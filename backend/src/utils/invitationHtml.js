@@ -31,6 +31,36 @@ function convertLegacyUlToQuill(html) {
   });
 }
 
+function stripBreakingInlineStyles(html) {
+  return html.replace(/\sstyle="([^"]*)"/gi, (match, styles) => {
+    let cleaned = styles
+      .replace(/\bword-break\s*:\s*[^;"]+;?/gi, "")
+      .replace(/\boverflow-wrap\s*:\s*[^;"]+;?/gi, "")
+      .replace(/\bword-wrap\s*:\s*[^;"]+;?/gi, "")
+      .replace(/\bwhite-space\s*:\s*nowrap\b/gi, "white-space:normal")
+      .replace(/\bhyphens\s*:\s*[^;"]+;?/gi, "")
+      .replace(/\b(?:min-)?width\s*:\s*[^;"]+;?/gi, "")
+      .replace(/\bmax-width\s*:\s*[^;"]+;?/gi, "")
+      .replace(/;;+/g, ";")
+      .replace(/^;|;$/g, "")
+      .trim();
+    if (!cleaned) return "";
+    return ` style="${cleaned}"`;
+  });
+}
+
+/** Non-breaking spaces prevent line wrap and cause horizontal overflow/clipping */
+function normalizeWrappingSpaces(html) {
+  return html
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&#160;/gi, " ")
+    .replace(/\u00a0/g, " ");
+}
+
+function removeSoftHyphens(html) {
+  return html.replace(/&shy;|&#173;/gi, "").replace(/\u00ad/g, "");
+}
+
 function repairLegacyOl(html) {
   return html.replace(/<ol\b([^>]*)>([\s\S]*?)<\/ol>/gi, (match, attrs, inner) => {
     if (/\bdata-list\s*=/i.test(inner)) {
@@ -53,6 +83,9 @@ function normalizeInvitationHtml(html) {
 
   let out = html;
 
+  out = removeSoftHyphens(out);
+  out = normalizeWrappingSpaces(out);
+  out = stripBreakingInlineStyles(out);
   out = convertLegacyUlToQuill(out);
   out = repairLegacyOl(out);
   out = ensureQuillListUi(out);

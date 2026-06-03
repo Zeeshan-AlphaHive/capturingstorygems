@@ -58,7 +58,7 @@ export default function InvitationPage() {
   const displayTitle = title.trim() || "Invitation";
 
   return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-br from-[#FAF9F6] to-[#F1FAEE]">
+    <div className="min-h-screen flex flex-col min-w-0 w-full bg-gradient-to-br from-[#FAF9F6] to-[#F1FAEE]">
       <div className="relative w-full py-6 sm:py-8 bg-gradient-to-r from-[#457B9D] to-[#375E73]">
         <div className="absolute inset-0 overflow-hidden opacity-10 pointer-events-none">
           <div className="absolute top-4 left-6 w-20 h-20 bg-white rounded-full blur-2xl" />
@@ -75,7 +75,7 @@ export default function InvitationPage() {
               aria-hidden
             />
           </div>
-          <h1 className="text-2xl sm:text-3xl font-[Cormorant_Garamond] font-bold mb-1 break-words px-2 leading-tight">
+          <h1 className="text-2xl sm:text-3xl font-[Cormorant_Garamond] font-bold mb-1 max-w-full break-normal px-2 leading-tight">
             {loading ? "Loading..." : displayTitle}
           </h1>
           <p className="text-sm sm:text-base opacity-90">
@@ -102,9 +102,9 @@ export default function InvitationPage() {
           <article className="w-full min-w-0 bg-white rounded-xl sm:rounded-2xl shadow-[0_8px_32px_rgba(29,53,87,0.1)] border border-gray-100 overflow-hidden">
             <div className="h-1 bg-gradient-to-r from-[#A8DADC] via-[#457B9D] to-[#1D3557]" />
 
-            <div className="px-5 sm:px-8 lg:px-12 py-8 sm:py-10 min-w-0 overflow-hidden">
+            <div className="px-5 sm:px-8 lg:px-12 py-8 sm:py-10 min-w-0 w-full overflow-x-hidden">
               {html ? (
-                <div className="ql-snow invitation-quill-view w-full min-w-0">
+                <div className="ql-snow invitation-quill-view w-full max-w-full min-w-0 overflow-x-hidden">
                   <div
                     ref={contentRef}
                     className="ql-editor"

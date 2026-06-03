@@ -61,7 +61,7 @@ export default function LinkifiedText({
               href={href}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-blue-600 font-medium underline decoration-blue-600 underline-offset-2 break-all hover:text-blue-700"
+              className="text-blue-600 font-medium underline decoration-blue-600 underline-offset-2 break-words hover:text-blue-700"
             >
               {clean}
             </a>

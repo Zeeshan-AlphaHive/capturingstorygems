@@ -104,11 +104,17 @@ button {
 .custom-quill-container.invitation-quill-view .ql-editor {
   padding: 24px !important;
   height: auto;
-  overflow: visible;
-  max-width: 100%;
-  min-width: 0;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+  overflow-x: hidden;
+  overflow-y: visible;
+  /* break-word wraps at spaces; only splits long tokens when needed */
+  overflow-wrap: break-word !important;
+  word-wrap: break-word !important;
+  word-break: normal !important;
+  hyphens: none !important;
   white-space: pre-wrap !important;
   line-height: 1.42 !important;
 }
@@ -145,6 +151,33 @@ button {
 .invitation-quill-view .ql-editor p,
 .custom-quill-container.invitation-quill-view .ql-editor p {
   min-height: 1.42em;
+}
+
+/* Block text only — do not style inline spans (Quill wraps words; max-width on span splits letters) */
+.invitation-quill-view .ql-editor p,
+.invitation-quill-view .ql-editor h1,
+.invitation-quill-view .ql-editor h2,
+.invitation-quill-view .ql-editor h3,
+.invitation-quill-view .ql-editor h4,
+.invitation-quill-view .ql-editor h5,
+.invitation-quill-view .ql-editor h6,
+.invitation-quill-view .ql-editor blockquote,
+.invitation-quill-view .ql-editor li,
+.custom-quill-container.invitation-quill-view .ql-editor p,
+.custom-quill-container.invitation-quill-view .ql-editor h1,
+.custom-quill-container.invitation-quill-view .ql-editor h2,
+.custom-quill-container.invitation-quill-view .ql-editor h3,
+.custom-quill-container.invitation-quill-view .ql-editor h4,
+.custom-quill-container.invitation-quill-view .ql-editor h5,
+.custom-quill-container.invitation-quill-view .ql-editor h6,
+.custom-quill-container.invitation-quill-view .ql-editor blockquote,
+.custom-quill-container.invitation-quill-view .ql-editor li {
+  box-sizing: border-box;
+  max-width: 100%;
+  overflow-wrap: break-word !important;
+  word-wrap: break-word !important;
+  word-break: normal !important;
+  hyphens: none !important;
 }
 
 .invitation-quill-view .ql-editor br,
@@ -237,6 +270,14 @@ button {
   white-space: pre-wrap;
   overflow-x: auto;
   max-width: 100%;
+}
+
+/* Links: wrap whole words; only long URL strings may break mid-link */
+.invitation-quill-view .ql-editor a,
+.custom-quill-container.invitation-quill-view .ql-editor a {
+  overflow-wrap: break-word !important;
+  word-break: normal !important;
+  word-wrap: normal !important;
 }
 
 /* Hide scrollbars utility for the sidebar */
