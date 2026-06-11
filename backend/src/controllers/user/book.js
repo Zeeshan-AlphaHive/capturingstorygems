@@ -124,7 +124,7 @@ async function embedFontFromUrl(pdfDoc, url, fallbackStandardFont) {
       if (fontkit && typeof pdfDoc.registerFontkit === 'function') {
         try { pdfDoc.registerFontkit(fontkit); } catch (re) { /* ignore */ }
       }
-      return await pdfDoc.embedFont(buf);
+      return await pdfDoc.embedFont(buf, { features: { liga: false } });
     } catch (e) {
       console.warn("embedFontFromUrl: embedding remote font failed, falling back to standard font:", e?.message || e);
       return await pdfDoc.embedFont(fallbackStandardFont);
@@ -484,13 +484,13 @@ const generateBookPdf = async (req, res) => {
     let serifFont;
     let serifBold;
     try {
-      serifFont = serifBuf ? await interiorPdf.embedFont(serifBuf) : await interiorPdf.embedFont(StandardFonts.TimesRoman);
+      serifFont = serifBuf ? await interiorPdf.embedFont(serifBuf, { features: { liga: false } }) : await interiorPdf.embedFont(StandardFonts.TimesRoman);
     } catch (e) {
       console.warn('Failed to embed serif regular font, falling back to StandardFonts.TimesRoman:', e?.message || e);
       serifFont = await interiorPdf.embedFont(StandardFonts.TimesRoman);
     }
     try {
-      serifBold = serifBoldBuf ? await interiorPdf.embedFont(serifBoldBuf) : await interiorPdf.embedFont(StandardFonts.TimesRomanBold);
+      serifBold = serifBoldBuf ? await interiorPdf.embedFont(serifBoldBuf, { features: { liga: false } }) : await interiorPdf.embedFont(StandardFonts.TimesRomanBold);
     } catch (e) {
       console.warn('Failed to embed serif bold font, falling back to StandardFonts.TimesRomanBold:', e?.message || e);
       serifBold = await interiorPdf.embedFont(StandardFonts.TimesRomanBold);
@@ -969,13 +969,13 @@ const generateBookPdf = async (req, res) => {
     let sansFont;
     let sansBold;
     try {
-      sansFont = sansBuf ? await coverPdf.embedFont(sansBuf) : await embedFontFromUrl(coverPdf, process.env.SANS_FONT_REGULAR_URL, StandardFonts.Helvetica);
+      sansFont = sansBuf ? await coverPdf.embedFont(sansBuf, { features: { liga: false } }) : await embedFontFromUrl(coverPdf, process.env.SANS_FONT_REGULAR_URL, StandardFonts.Helvetica);
     } catch (e) {
       console.warn('Failed to embed sans regular font, falling back to StandardFonts.Helvetica:', e?.message || e);
       sansFont = await coverPdf.embedFont(StandardFonts.Helvetica);
     }
     try {
-      sansBold = sansBoldBuf ? await coverPdf.embedFont(sansBoldBuf) : await embedFontFromUrl(coverPdf, process.env.SANS_FONT_BOLD_URL, StandardFonts.HelveticaBold);
+      sansBold = sansBoldBuf ? await coverPdf.embedFont(sansBoldBuf, { features: { liga: false } }) : await embedFontFromUrl(coverPdf, process.env.SANS_FONT_BOLD_URL, StandardFonts.HelveticaBold);
     } catch (e) {
       console.warn('Failed to embed sans bold font, falling back to StandardFonts.HelveticaBold:', e?.message || e);
       sansBold = await coverPdf.embedFont(StandardFonts.HelveticaBold);
