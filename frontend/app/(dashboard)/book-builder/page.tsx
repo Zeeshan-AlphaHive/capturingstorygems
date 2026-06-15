@@ -159,7 +159,8 @@ export default function BookBuilderPage() {
     return items
       .slice()
       .sort((a, b) => a.order - b.order)
-      .map((it) => it.storyId);
+      .map((it) => it.storyId)
+      .filter((s): s is NonNullable<typeof s> => !!s && typeof s === "object" && typeof s._id === "string");
   }, [book]);
 
   const storyIds = useMemo(() => storyList.map((s) => s._id), [storyList]);

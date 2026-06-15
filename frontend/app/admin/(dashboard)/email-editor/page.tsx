@@ -9,6 +9,7 @@ import {
   getEmailTemplateAdmin,
   upsertEmailTemplateAdmin,
 } from "@/api/emailTemplateApis";
+import { normalizeInvitationHtml } from "@/utils/invitationHtml";
 
 // 1. Dynamically import the new Quill library (Disables SSR to prevent crashes)
 const ReactQuill = dynamic(() => import("react-quill-new"), {
@@ -66,7 +67,7 @@ export default function EmailEditorPage() {
       }
       const data = await getEmailTemplateAdmin(token, TEMPLATE_KEY);
       setSubject(data.subject || "");
-      setContent(data.html || "");
+      setContent(normalizeInvitationHtml(data.html || ""));
     } catch (err: any) {
       const message = err?.message || "Failed to load email template";
       if (handleSessionExpiry(message, router, true)) return;
@@ -160,7 +161,7 @@ export default function EmailEditorPage() {
               />
             </div>
 
-            <div className="custom-quill-container rounded-xl border border-gray-200 overflow-hidden">
+            <div className="custom-quill-container invitation-quill-view rounded-xl border border-gray-200 overflow-hidden">
               <ReactQuill
                 theme="snow"
                 value={content}

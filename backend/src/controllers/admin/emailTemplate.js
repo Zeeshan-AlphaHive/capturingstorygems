@@ -1,4 +1,5 @@
 const EmailTemplate = require("../../models/emailTemplate.js");
+const { normalizeInvitationHtml } = require("../../utils/invitationHtml.js");
 
 const DEFAULT_KEY = "lead-newsletter";
 
@@ -14,7 +15,7 @@ const getEmailTemplate = async (req, res) => {
         data: {
           key,
           subject: doc?.subject || "",
-          html: doc?.html || "",
+          html: normalizeInvitationHtml(doc?.html || ""),
           updatedAt: doc?.updatedAt || null,
         },
       },
@@ -33,7 +34,7 @@ const upsertEmailTemplate = async (req, res) => {
   try {
     const key = String(req.body?.key || DEFAULT_KEY).trim() || DEFAULT_KEY;
     const subject = String(req.body?.subject || "");
-    const html = String(req.body?.html || "");
+    const html = normalizeInvitationHtml(String(req.body?.html || ""));
 
     const doc = await EmailTemplate.findOneAndUpdate(
       { key },
@@ -47,7 +48,7 @@ const upsertEmailTemplate = async (req, res) => {
         data: {
           key: doc.key,
           subject: doc.subject || "",
-          html: doc.html || "",
+          html: normalizeInvitationHtml(doc.html || ""),
           updatedAt: doc.updatedAt || null,
         },
       },
