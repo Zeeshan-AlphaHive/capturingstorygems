@@ -587,6 +587,44 @@ const seedMockStoriesForMe = async (req, res) => {
   }
 };
 
+const transcribeAudio = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        message: "No audio file provided",
+        response: null,
+        error: "No audio file provided",
+      });
+    }
+
+    const { toFile } = require("openai");
+
+    // Convert buffer to file object that openai expects
+    const file = await toFile(req.file.buffer, "audio.webm");
+
+    const response = await getOpenAI().audio.transcriptions.create({
+      file: file,
+      model: "whisper-1",
+      language: "en",
+    });
+
+    return res.status(200).json({
+      message: "Audio transcribed successfully",
+      response: {
+        text: response.text,
+      },
+      error: null,
+    });
+  } catch (error) {
+    console.error("Transcription error:", error);
+    return res.status(500).json({
+      message: "Failed to transcribe audio",
+      response: null,
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   createStory,
   generateStory,
@@ -596,4 +634,5 @@ module.exports = {
   uploadHeroImage,
   deleteStory,
   seedMockStoriesForMe,
+  transcribeAudio,
 };

@@ -1,12 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { PenTool, Mic } from "lucide-react";
-import SpeechRecognition, {
-  useSpeechRecognition,
-} from "react-speech-recognition";
+import { useAudioRecorder } from "@/hooks/useAudioRecorder";
 import { handleSessionExpiry } from "@/utils/handleSessionExpiry";
 import { PrivateRoute } from "@/utils/RouteProtection";
 import { toast } from "sonner";
@@ -18,16 +16,67 @@ export default function ClarityQuestions() {
   const [disabled, setDisabled] = useState(false);
   const [activeMode, setActiveMode] = useState<"text" | "mic">("text");
   const [isLoading, setIsLoading] = useState(false);
-  const [textTranscript, setTextTranscript] = useState("");
   const [errors, setErrors] = useState({
     story: "",
   });
+
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const {
-    transcript,
-    resetTranscript,
-    listening,
-    browserSupportsSpeechRecognition,
-  } = useSpeechRecognition();
+    isRecording,
+    recordingTime,
+    startRecording,
+    stopRecording,
+  } = useAudioRecorder();
+
+  const handleMicToggle = async () => {
+    if (isRecording) {
+      try {
+        const audioBlob = await stopRecording();
+        setActiveMode("text");
+        setIsTranscribing(true);
+
+        const token = localStorage.getItem("token");
+        const formData = new FormData();
+        formData.append("audio", audioBlob, "audio.webm");
+
+        const response = await fetch(`${serverBaseUrl}/user/story/transcribe`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          body: formData,
+        });
+
+        const data = await response.json();
+        setIsTranscribing(false);
+
+        if (response.ok && data.response?.text) {
+          const transcribedText = data.response.text.trim();
+          if (transcribedText) {
+            setStory((prev) => {
+              const base = prev.trim();
+              const space = base ? " " : "";
+              return base + space + transcribedText;
+            });
+            toast.success("Transcription complete!");
+          }
+        } else {
+          toast.error(data.message || "Failed to transcribe audio");
+        }
+      } catch (err: any) {
+        setIsTranscribing(false);
+        toast.error("Error transcribing audio: " + err.message);
+      }
+    } else {
+      try {
+        setActiveMode("mic");
+        await startRecording();
+      } catch (err: any) {
+        setActiveMode("text");
+        toast.error("Could not access microphone: " + err.message);
+      }
+    }
+  };
 
   useEffect(() => {
     const storedStory = sessionStorage.getItem("story");
@@ -40,35 +89,7 @@ export default function ClarityQuestions() {
     sessionStorage.setItem("story", story);
   }, [story]);
 
-  useEffect(() => {
-    if (activeMode === "mic") {
-      if (!browserSupportsSpeechRecognition) {
-        toast.error("Browser doesn't support speech recognition");
-        return setActiveMode("text");
-      }
-      SpeechRecognition.startListening({
-        continuous: true,
-        language: "en-US",
-      });
-    } else {
-      SpeechRecognition.stopListening();
-    }
-  }, [activeMode]);
 
-  useEffect(() => {
-    if (activeMode === "mic" && transcript) {
-      setStory((prev) => {
-        if (prev.endsWith(transcript)) return prev;
-        return textTranscript + " " + transcript;
-      });
-    }
-  }, [transcript, activeMode]);
-
-  useEffect(() => {
-    if (!listening) {
-      resetTranscript();
-    }
-  }, [listening, activeMode]);
 
   const handleContinue = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -148,11 +169,10 @@ export default function ClarityQuestions() {
                 <div className="absolute bottom-3 right-3 flex gap-2">
                   <button
                     onClick={() => {
-                      setActiveMode("mic");
-                      setTextTranscript(story);
+                      handleMicToggle();
                     }}
                     className={`p-2 rounded-full transition duration-200 shadow-lg ${
-                      activeMode === "mic"
+                      isRecording
                         ? "bg-red-500 hover:bg-red-600 animate-pulse"
                         : "bg-[#457B9D] hover:bg-[#1D3557] hover:shadow-xl transform hover:scale-110"
                     }`}
@@ -162,10 +182,15 @@ export default function ClarityQuestions() {
                   </button>
 
                   <button
-                    onClick={() => setActiveMode("text")}
+                    onClick={() => {
+                      if (isRecording) {
+                        stopRecording().catch(() => {});
+                      }
+                      setActiveMode("text");
+                    }}
                     className={`p-2 rounded-full transition duration-200 shadow-lg ${
                       activeMode === "text"
-                        ? "bg-red-500 hover:bg-red-600 animate-pulse"
+                        ? "bg-[#1D3557]"
                         : "bg-[#457B9D] hover:bg-[#1D3557] hover:shadow-xl transform hover:scale-110"
                     }`}
                     title="Writing assistant"
@@ -180,6 +205,25 @@ export default function ClarityQuestions() {
                 </p>
               )}
             </div>
+
+            {isRecording && (
+              <div className="mt-2 text-xs text-red-700 bg-red-50/80 p-3 rounded-xl border border-red-200 leading-relaxed shadow-sm transition-all duration-200 flex items-center justify-between animate-pulse">
+                <span className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-red-600 animate-ping"></span>
+                  <strong>Recording...</strong> Speak your thoughts clearly.
+                </span>
+                <span className="font-mono font-semibold">
+                  {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, "0")}
+                </span>
+              </div>
+            )}
+
+            {isTranscribing && (
+              <div className="mt-2 text-xs text-blue-700 bg-blue-50/80 p-3 rounded-xl border border-blue-200 leading-relaxed shadow-sm transition-all duration-200 flex items-center gap-2">
+                <span className="w-3.5 h-3.5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></span>
+                <span>Transcribing your memory with OpenAI Whisper... Please wait.</span>
+              </div>
+            )}
 
             {/* Navigation Buttons */}
             <div className="flex justify-end text-[20px] items-center mt-4">
