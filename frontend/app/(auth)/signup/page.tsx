@@ -21,6 +21,7 @@ const SignUp = () => {
     confirmPassword: "",
   });
   const [alertMessage, setAlertMessage] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
 
   // States to handle password visibility
   const [passwordVisible, setPasswordVisible] = useState(false);
@@ -42,6 +43,12 @@ const SignUp = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!acceptedTerms) {
+      toast.error("Please accept the Terms of Service and Privacy Policy.");
+      return;
+    }
+
     setDisabled(true);
     setErrors({
       email: "",
@@ -146,11 +153,42 @@ const SignUp = () => {
               </p>
             )}
 
+            <label className="flex items-start gap-3 mt-5 mb-1 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={acceptedTerms}
+                onChange={(e) => setAcceptedTerms(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-[#A8DADC] accent-[#457B9D] cursor-pointer"
+              />
+              <span className="text-sm text-[#1D3557] leading-relaxed">
+                I agree to the{" "}
+                <a
+                  href="/terms-of-service"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-semibold text-[#457B9D] underline decoration-[#457B9D]/40 hover:decoration-[#457B9D]"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  Terms of Service
+                </a>{" "}
+                and{" "}
+                <a
+                  href="/privacy-policy"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-semibold text-[#457B9D] underline decoration-[#457B9D]/40 hover:decoration-[#457B9D]"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  Privacy Policy
+                </a>
+              </span>
+            </label>
+
             <AuthButton
               text="Sign Up"
               type="submit"
-              className="mt-3 w-full"
-              isDisabled={disabled}
+              className="mt-4 w-full"
+              isDisabled={disabled || !acceptedTerms}
             />
           </form>
 
@@ -159,7 +197,16 @@ const SignUp = () => {
             <span className="mx-4 text-[#1D3557] text-sm font-bold">Or</span>
             <div className="h-[1px] w-full bg-[#A8DADC]"></div>
           </div>
-          <GoogleLoginButton />
+          <div
+            className={`${!acceptedTerms ? "opacity-50 pointer-events-none" : ""}`}
+            title={
+              !acceptedTerms
+                ? "Please accept the Terms of Service and Privacy Policy first"
+                : undefined
+            }
+          >
+            <GoogleLoginButton />
+          </div>
 
           <div className="flex justify-center text-sm text-[#1D3557] gap-2 mt-3">
             <span className="">Already have an account?</span>
