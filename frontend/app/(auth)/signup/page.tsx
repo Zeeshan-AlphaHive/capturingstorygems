@@ -56,7 +56,7 @@ const SignUp = () => {
       confirmPassword: "",
     });
 
-    const formData = { email, password, confirmPassword };
+    const formData = { email, password, confirmPassword, acceptedTerms: true };
     try {
       const response = await fetch(`${serverBaseUrl}/user/auth/register`, {
         method: "POST",
@@ -205,7 +205,7 @@ const SignUp = () => {
                 : undefined
             }
           >
-            <GoogleLoginButton />
+            <GoogleLoginButton acceptedTerms={acceptedTerms} />
           </div>
 
           <div className="flex justify-center text-sm text-[#1D3557] gap-2 mt-3">

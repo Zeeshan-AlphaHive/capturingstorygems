@@ -76,6 +76,7 @@ require("dotenv").config();
 require("./src/configs/database.js");
 
 const app = express();
+app.set("trust proxy", true);
 const port = process.env.PORT || 3001;
 const appName = process.env.APP_NAME || "capturing-story-gems-api";
 const version = process.env.API_VERSION || "v1";

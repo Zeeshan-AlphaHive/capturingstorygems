@@ -4,6 +4,8 @@ const { OAuth2Client } = require("google-auth-library");
 const { configurations } = require("../../configs/config.js");
 const { sendMail } = require("../../utils/send-mail.js");
 const User = require("../../models/user.js");
+const TermsAcceptance = require("../../models/termsAcceptance.js");
+const { getClientIp } = require("../../utils/getClientIp.js");
 const {
   signupEmail,
   resendOtpEmail,
@@ -36,6 +38,14 @@ function _initTrialFieldsOnUser(userDoc, { startDate }) {
   userDoc.trialEndDate = _calcTrialEndDate(start);
 }
 
+async function _recordTermsAcceptance(userId, req) {
+  await TermsAcceptance.create({
+    userId,
+    ipAddress: getClientIp(req),
+    acceptedAt: new Date(),
+  });
+}
+
 const registerUser = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -60,6 +70,7 @@ const registerUser = async (req, res) => {
       10000 + Math.random() * 90000
     ).toString();
     const codeExpiry = new Date(Date.now() + 5 * 60 * 1000);
+    let savedUser;
 
     if (!existingUser) {
       const newUser = new User({
@@ -71,7 +82,7 @@ const registerUser = async (req, res) => {
       });
 
       _initTrialFieldsOnUser(newUser, { startDate: new Date() });
-      await newUser.save();
+      savedUser = await newUser.save();
     } else {
       existingUser.password = hashedPassword;
       existingUser.emailVerificationCode = verificationCode;
@@ -79,8 +90,10 @@ const registerUser = async (req, res) => {
 
       // If trial fields are missing for older accounts, initialize once based on original createdAt.
       _initTrialFieldsOnUser(existingUser, { startDate: existingUser.createdAt || new Date() });
-      await existingUser.save();
+      savedUser = await existingUser.save();
     }
+
+    await _recordTermsAcceptance(savedUser._id, req);
     const dynamicData = {
       subject: "Verify Your Email",
       to_email: email,
@@ -104,7 +117,7 @@ const registerUser = async (req, res) => {
 };
    
 const googleLoginUser = async (req, res) => {
-  const { credential } = req.body;
+  const { credential, acceptedTerms } = req.body;
   const client = new OAuth2Client(configurations.googleClientId);
 
   try {
@@ -120,6 +133,15 @@ const googleLoginUser = async (req, res) => {
 
     let user = await User.findOne({ email: normalizedEmail });
     if (!user) {
+      if (!acceptedTerms) {
+        return res.status(400).json({
+          message:
+            "You must accept the Terms of Service and Privacy Policy to create an account",
+          response: null,
+          error: "Terms not accepted",
+        });
+      }
+
       user = new User({
         email: normalizedEmail,
         googleId,
@@ -129,6 +151,7 @@ const googleLoginUser = async (req, res) => {
 
       _initTrialFieldsOnUser(user, { startDate: new Date() });
       await user.save();
+      await _recordTermsAcceptance(user._id, req);
     } else {
       if (user.status === "blocked") {
         return res.status(400).json({

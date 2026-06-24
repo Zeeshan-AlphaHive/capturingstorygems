@@ -46,6 +46,10 @@ module.exports = {
         "any.required": "Confirm password is required",
         "string.empty": "Confirm password is not allowed to be empty",
       }),
+    acceptedTerms: Joi.boolean().valid(true).required().messages({
+      "any.only": "You must accept the Terms of Service and Privacy Policy",
+      "any.required": "You must accept the Terms of Service and Privacy Policy",
+    }),
   }),
 
   publicUserRegisterSchema: Joi.object({
@@ -106,6 +110,9 @@ module.exports = {
     credential: Joi.string().required().messages({
       "any.required": "Credential is required",
       "string.empty": "Credential cannot be empty",
+    }),
+    acceptedTerms: Joi.boolean().valid(true).optional().messages({
+      "any.only": "You must accept the Terms of Service and Privacy Policy",
     }),
   }),
 

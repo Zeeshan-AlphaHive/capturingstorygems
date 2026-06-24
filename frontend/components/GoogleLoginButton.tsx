@@ -4,15 +4,30 @@ import { GoogleLogin, CredentialResponse } from "@react-oauth/google";
 import { useRouter } from "next/navigation";
 const serverBaseUrl = process.env.NEXT_PUBLIC_BACKEND_SERVER_URL;
 
-const GoogleLoginButton = () => {
+interface GoogleLoginButtonProps {
+  acceptedTerms?: boolean;
+}
+
+const GoogleLoginButton = ({ acceptedTerms = false }: GoogleLoginButtonProps) => {
   const router = useRouter();
 
   const handleLoginSuccess = async (credentialResponse: CredentialResponse) => {
     try {
+      const payload: {
+        credential?: string;
+        acceptedTerms?: boolean;
+      } = {
+        credential: credentialResponse.credential,
+      };
+
+      if (acceptedTerms) {
+        payload.acceptedTerms = true;
+      }
+
       const response = await fetch(`${serverBaseUrl}/user/auth/google-login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ credential: credentialResponse.credential }),
+        body: JSON.stringify(payload),
       });
 
       const result = await response.json();
