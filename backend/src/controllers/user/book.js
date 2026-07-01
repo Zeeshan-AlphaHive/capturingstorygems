@@ -42,6 +42,12 @@ function ensureFontkitRegistered(pdfDoc) {
 const QRCode = require("qrcode");
 const cloudinary = require("../../configs/cloudinary.util.js");
 const luluClient = require("../../utils/luluClient.js");
+const {
+  optimizeImageForPdf,
+  embedOptsForSize,
+  ensurePdfUnderCloudinaryLimit,
+  CLOUDINARY_MAX_BYTES,
+} = require("../../utils/pdfImage.util.js");
 const Book = require("../../models/book.js");
 const Story = require("../../models/story.js");
 
@@ -69,17 +75,21 @@ function wrapText(text, font, fontSize, maxWidth) {
 }
 
 /** Fetch a remote image and embed it in a PDFDocument. Returns { image, width, height } or null. */
-async function embedRemoteImage(pdfDoc, url) {
+async function embedRemoteImage(pdfDoc, url, options = {}) {
   try {
     const resp = await axios.get(url, { responseType: "arraybuffer", timeout: 15000 });
-    const buf = Buffer.from(resp.data);
-    const ct = (resp.headers["content-type"] || "").toLowerCase();
+    let buf = Buffer.from(resp.data);
+    buf = await optimizeImageForPdf(buf, {
+      maxWidthPx: options.maxWidthPx,
+      maxHeightPx: options.maxHeightPx,
+      quality: options.quality,
+    });
+
     let image;
-    if (ct.includes("png")) {
-      image = await pdfDoc.embedPng(buf);
-    } else {
-      // default to JPEG for jpg/jpeg/webp/other
+    try {
       image = await pdfDoc.embedJpg(buf);
+    } catch {
+      image = await pdfDoc.embedPng(buf);
     }
     return { image, width: image.width, height: image.height };
   } catch (e) {
@@ -542,7 +552,13 @@ const generateBookPdf = async (req, res) => {
     const rawAuthor = reqAuthorName || book.authorName || "";
     if (reqCoverImage && typeof reqCoverImage === 'string' && reqCoverImage.trim().length > 0) {
       try {
-        const emb = await embedRemoteImage(interiorPdf, reqCoverImage);
+        const titleImgMaxW = CONTENT_W * 0.9;
+        const titleImgMaxH = PAGE_H * 0.28;
+        const emb = await embedRemoteImage(
+          interiorPdf,
+          reqCoverImage,
+          embedOptsForSize(titleImgMaxW, titleImgMaxH)
+        );
         if (emb && emb.image) {
           const maxW = CONTENT_W * 0.9;
           const maxH = PAGE_H * 0.28;
@@ -692,7 +708,14 @@ const generateBookPdf = async (req, res) => {
 
       if (s.heroImageUrl) {
         try {
-          imgData = await embedRemoteImage(interiorPdf, s.heroImageUrl);
+          const maxImgW =
+            alignment === "center" ? CONTENT_W : CONTENT_W * 0.4;
+          const maxImgH = 4 * PTS_PER_INCH;
+          imgData = await embedRemoteImage(
+            interiorPdf,
+            s.heroImageUrl,
+            embedOptsForSize(maxImgW, maxImgH)
+          );
           if (imgData) {
             // For left/right alignment, image takes ~40% of content width
             // For center, image stretches to full width
@@ -918,6 +941,9 @@ const generateBookPdf = async (req, res) => {
     const interiorBytes = await interiorPdf.save();
     const interiorPath = path.join(booksDir, `interior-${book._id}.pdf`);
     fs.writeFileSync(interiorPath, interiorBytes);
+    console.log(
+      `Interior PDF size: ${(interiorBytes.length / 1024 / 1024).toFixed(2)}MB`
+    );
 
     // =================================================
     //  COVER PDF (single-page spread) — pdf-lib
@@ -1027,7 +1053,12 @@ const generateBookPdf = async (req, res) => {
     // Place a centered hero image and reserve vertical space for title/author below it
     if (coverImageUrl) {
       try {
-        const imgData = await embedRemoteImage(coverPdf, coverImageUrl);
+        const HERO_MAX_HEIGHT = chPt * 0.28;
+        const imgData = await embedRemoteImage(
+          coverPdf,
+          coverImageUrl,
+          embedOptsForSize(frontContentW, HERO_MAX_HEIGHT)
+        );
         if (imgData) {
           const maxW = frontContentW;
           const HERO_MAX_HEIGHT = chPt * 0.28; // ~28% of cover height
@@ -1073,24 +1104,42 @@ const generateBookPdf = async (req, res) => {
     const coverBytes = await coverPdf.save();
     const coverPath = path.join(booksDir, `cover-${book._id}.pdf`);
     fs.writeFileSync(coverPath, coverBytes);
+    console.log(`Cover PDF size: ${(coverBytes.length / 1024 / 1024).toFixed(2)}MB`);
 
     // =================================================
     //  UPLOAD BOTH TO CLOUDINARY
     // =================================================
+    const interiorUploadPath = await ensurePdfUnderCloudinaryLimit(interiorPath);
+    const coverUploadPath = await ensurePdfUnderCloudinaryLimit(coverPath);
+
+    for (const [label, uploadPath] of [
+      ["Interior", interiorUploadPath],
+      ["Cover", coverUploadPath],
+    ]) {
+      const uploadSize = fs.statSync(uploadPath).size;
+      if (uploadSize > CLOUDINARY_MAX_BYTES) {
+        throw new Error(
+          `${label} PDF is still ${(uploadSize / 1024 / 1024).toFixed(2)}MB after compression (Cloudinary limit is 10MB). Try using smaller source images.`
+        );
+      }
+    }
+
     // Upload Interior
-    const interiorUpload = await cloudinary.uploader.upload(interiorPath, {
+    const interiorUpload = await cloudinary.uploader.upload(interiorUploadPath, {
       resource_type: "image", folder: "books", public_id: `interior-${book._id}`, format: "pdf"
     });
 
     // Upload Cover
-    const coverUpload = await cloudinary.uploader.upload(coverPath, {
+    const coverUpload = await cloudinary.uploader.upload(coverUploadPath, {
       resource_type: "raw", folder: "covers", public_id: `cover-${book._id}`, format: "pdf"
     });
 
     // Cleanup local files
     try {
-      if (fs.existsSync(interiorPath)) fs.unlinkSync(interiorPath);
-      if (fs.existsSync(coverPath)) fs.unlinkSync(coverPath);
+      const pathsToRemove = new Set([interiorPath, coverPath, interiorUploadPath, coverUploadPath]);
+      for (const p of pathsToRemove) {
+        if (p && fs.existsSync(p)) fs.unlinkSync(p);
+      }
     } catch (e) { console.warn("Cleanup error", e); }
 
     // Save to DB
