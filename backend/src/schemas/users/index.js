@@ -343,6 +343,28 @@ module.exports = {
     }),
   }),
 
+  storyChatSchema: Joi.object({
+    messages: Joi.array()
+      .items(
+        Joi.object({
+          role: Joi.string().valid("user", "assistant").required().messages({
+            "any.only": "Message role must be 'user' or 'assistant'",
+            "any.required": "Message role is required",
+          }),
+          content: Joi.string().allow("").max(20000).required().messages({
+            "string.max": "A message cannot exceed 20,000 characters",
+            "any.required": "Message content is required",
+          }),
+        })
+      )
+      .min(1)
+      .required()
+      .messages({
+        "array.min": "At least one message is required",
+        "any.required": "Conversation messages are required",
+      }),
+  }),
+
   reviseStorySchema: Joi.object({
   story: Joi.string().max(10000).optional().messages({
     "string.max": "Story cannot exceed 10,000 characters",

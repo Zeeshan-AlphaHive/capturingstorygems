@@ -13,6 +13,8 @@ const {
   deleteStory,
   seedMockStoriesForMe,
   transcribeAudio,
+  chatMemory,
+  generateStoryFromConversation,
 } = require("../../controllers/user/story.js");
 const { verifyUserToken } = require("../../middlewares/authMiddleware.js");
 const { blockPublicUsers } = require("../../middlewares/blockPublicUsers.js");
@@ -23,6 +25,20 @@ router.post("/", verifyUserToken, bodyValidator("storySchema"), createStory);
 router.post("/transcribe", verifyUserToken, upload.single("audio"), transcribeAudio);
 
 router.post("/generate", verifyUserToken, generateStory);
+
+router.post(
+  "/conversation",
+  verifyUserToken,
+  bodyValidator("storyChatSchema"),
+  chatMemory
+);
+
+router.post(
+  "/conversation/generate",
+  verifyUserToken,
+  bodyValidator("storyChatSchema"),
+  generateStoryFromConversation
+);
 
 router.get("/resend", verifyUserToken, blockPublicUsers, resendStory);
 

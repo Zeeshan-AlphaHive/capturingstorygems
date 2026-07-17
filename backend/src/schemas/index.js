@@ -22,6 +22,7 @@ const {
   passwordUpdate,
   updatePublicUserSchema,
   storySchema,
+  storyChatSchema,
   reviseStorySchema,
   supportRequestSchema,
 } = require("./users/index");
@@ -47,6 +48,7 @@ module.exports = {
   passwordUpdate,
   updatePublicUserSchema,
   storySchema,
+  storyChatSchema,
   reviseStorySchema,
   supportRequestSchema,
 };

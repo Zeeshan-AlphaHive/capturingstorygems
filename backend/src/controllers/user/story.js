@@ -12,6 +12,100 @@ const {
   evaluateStoryAccess,
 } = require("../../utils/storyAccess.js");
 
+// ── Guided Memory Experience (conversation mode) ──────────────────
+// Default operational prompt used when no "memory-conversation-prompt" exists in the DB.
+// Admins can override this by creating/editing a Prompt named "memory-conversation-prompt".
+const DEFAULT_MEMORY_CONVERSATION_PROMPT = `
+You are the gentle memory guide for Capturing Story Gems (CSG). You help a storyteller
+rediscover a meaningful memory through a warm, unhurried conversation.
+
+The Central Operating Question
+Before every response silently ask:
+"What experience will best serve this storyteller right now?"
+Never ask: What question comes next? What information is missing? How do I keep the conversation going?
+Instead ask: What would help them reconnect? What would help this memory become clearer?
+What would help them notice something meaningful? What would build confidence?
+What would help them preserve authenticity?
+Every response should improve the storyteller's experience.
+
+Guided Memory Experience — every meaningful memory naturally moves through five gentle stages:
+Notice → Reconnect → Explore → Recognize → Preserve.
+Do not force movement. Follow the storyteller's pace.
+
+Conversation Style — every conversation should feel like walking beside someone, not interviewing them:
+- Observe before questioning.
+- Reflect before exploring.
+- Invite before directing.
+- Recognize before summarizing.
+- Offer choices frequently.
+- Allow pauses, unfinished thoughts, and silence.
+- Thoughtful observations are often more valuable than additional questions.
+- Keep replies short, warm, and human (usually 2–5 sentences). Ask at most one gentle question at a time.
+
+Throughout the experience, quietly notice whether Story Gems are beginning to emerge.
+Allow the storyteller to discover them first. If appropriate, gently reflect what seems to be emerging.
+When the memory feels rich and complete, gently let them know it seems ready, and remind them
+they can select "Create My Story" whenever they feel ready — never pressure them.
+`.trim();
+
+const MEMORY_STATUS_INSTRUCTION = `
+After your conversational reply, append a private machine-readable status block in EXACTLY this format:
+<STORY_STATUS>{"progress":35,"covered":["setting"],"remaining":["emotions","meaning"],"ready":false,"summary":"The setting is clear; the emotional meaning still needs exploration."}</STORY_STATUS>
+
+Status rules:
+- progress must be an integer from 0 to 100 representing how ready the memory is to become a complete story.
+- Assess people, setting, sequence of events, sensory details, emotions, meaning/reflection, and a satisfying ending.
+- Create covered and remaining dynamically from the actual memory topic and details shared.
+- Every tag must be story-specific, such as "Grandmother's kitchen setting", "the train station farewell", or "why the blue bicycle mattered".
+- Never return generic category tags such as "people and setting", "events", "emotions", "meaning", or "ending".
+- Use an empty covered array if the storyteller has not provided enough information yet.
+- ready should be true only when the conversation contains enough authentic detail for a complete story.
+- summary must be one short, encouraging sentence explaining the current state.
+- Do not mention this status block in the conversational reply.
+`.trim();
+
+function parseMemoryReply(rawReply, userMessageCount) {
+  const statusMatch = rawReply.match(
+    /<STORY_STATUS>([\s\S]*?)<\/STORY_STATUS>/i
+  );
+  const reply = rawReply
+    .replace(/<STORY_STATUS>[\s\S]*?<\/STORY_STATUS>/gi, "")
+    .trim();
+
+  const fallbackProgress = Math.min(85, Math.max(10, userMessageCount * 12));
+  const fallbackStatus = {
+    progress: fallbackProgress,
+    covered: [],
+    remaining: [],
+    ready: false,
+    summary: "Your memory is taking shape as we continue exploring it together.",
+  };
+
+  if (!statusMatch) return { reply: reply || rawReply.trim(), status: fallbackStatus };
+
+  try {
+    const parsed = JSON.parse(statusMatch[1]);
+    return {
+      reply: reply || rawReply.trim(),
+      status: {
+        progress: Math.min(100, Math.max(0, Math.round(Number(parsed.progress) || 0))),
+        covered: Array.isArray(parsed.covered)
+          ? parsed.covered.map(String).slice(0, 8)
+          : [],
+        remaining: Array.isArray(parsed.remaining)
+          ? parsed.remaining.map(String).slice(0, 8)
+          : [],
+        ready: parsed.ready === true,
+        summary:
+          typeof parsed.summary === "string" && parsed.summary.trim()
+            ? parsed.summary.trim()
+            : fallbackStatus.summary,
+      },
+    };
+  } catch {
+    return { reply: reply || rawReply.trim(), status: fallbackStatus };
+  }
+}
 
 const createStory = async (req, res) => {
   const userId = req.decoded?.id;
@@ -625,6 +719,214 @@ const transcribeAudio = async (req, res) => {
   }
 };
 
+// POST /user/story/conversation
+// Deep memory discovery: takes the running conversation and returns the AI's next reply.
+const chatMemory = async (req, res) => {
+  const userId = req.decoded?.id;
+  const { messages } = req.body;
+
+  try {
+    const user = await User.findById(userId).select(
+      "isPublic trialUsed trialStartDate trialEndDate createdAt"
+    );
+    if (!user) {
+      return res.status(401).json({
+        message: "Unauthorized",
+        response: null,
+        error: "User not found",
+      });
+    }
+
+    const access = await assertCanUseStoriesOrRespond(res, user);
+    if (!access.ok) return;
+
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({
+        message: "Conversation messages are required",
+        response: null,
+        error: "Invalid messages",
+      });
+    }
+
+    // Prefer an admin-managed prompt; fall back to the built-in operational prompt.
+    const promptDoc = await Prompt.findOne({ name: "memory-conversation-prompt" });
+    const systemPrompt = promptDoc?.prompt?.trim() || DEFAULT_MEMORY_CONVERSATION_PROMPT;
+
+    const chatMessages = [
+      { role: "system", content: systemPrompt },
+      { role: "system", content: MEMORY_STATUS_INSTRUCTION },
+      ...messages
+        .filter((m) => m && (m.role === "user" || m.role === "assistant"))
+        .map((m) => ({ role: m.role, content: String(m.content || "") })),
+    ];
+
+    const completion = await getOpenAI().chat.completions.create({
+      model: "gpt-4",
+      messages: chatMessages,
+      temperature: 0.8,
+    });
+
+    const rawReply = completion.choices?.[0]?.message?.content?.trim();
+    if (!rawReply) {
+      return res.status(500).json({
+        message: "AI failed to respond",
+        response: null,
+        error: "AI returned no content",
+      });
+    }
+
+    const userMessageCount = messages.filter((m) => m?.role === "user").length;
+    const { reply, status } = parseMemoryReply(rawReply, userMessageCount);
+
+    return res.status(200).json({
+      message: "Reply generated successfully",
+      response: { reply, status },
+      error: null,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Internal server error",
+      response: null,
+      error: error.message,
+    });
+  }
+};
+
+// POST /user/story/conversation/generate
+// Turns the completed memory conversation into a finished, refined story.
+const generateStoryFromConversation = async (req, res) => {
+  const { id, email } = req.decoded;
+  const { messages } = req.body;
+
+  try {
+    const user = await User.findById(id).select(
+      "isPublic trialUsed trialStartDate trialEndDate createdAt"
+    );
+    if (!user) {
+      return res.status(401).json({
+        message: "Unauthorized",
+        response: null,
+        error: "User not found",
+      });
+    }
+
+    const access = await assertCanUseStoriesOrRespond(res, user);
+    if (!access.ok) return;
+
+    const normalizedMessages = (Array.isArray(messages) ? messages : [])
+      .filter((m) => m && (m.role === "user" || m.role === "assistant"))
+      .map((m) => ({ role: m.role, content: String(m.content || "") }));
+
+    const userMessages = normalizedMessages.filter((m) => m.role === "user");
+    if (userMessages.length === 0) {
+      return res.status(400).json({
+        message: "Please share some of your memory before creating the story",
+        response: null,
+        error: "No user input in conversation",
+      });
+    }
+
+    const transcript = normalizedMessages
+      .map((m) => `${m.role === "user" ? "Storyteller" : "Guide"}: ${m.content}`)
+      .join("\n");
+
+    // Reuse the existing narrative prompt; fall back gracefully if it's missing.
+    const promptDoc = await Prompt.findOne({ name: "story-prompt" });
+    const basePrompt =
+      promptDoc?.prompt?.trim() ||
+      "Write a warm, heartfelt first-person memory story based on the conversation below. Preserve the storyteller's authentic voice, details, and emotions.";
+
+    const conversationPart = `Guided Memory Conversation Transcript:\n${transcript}`;
+    const frameworkPrompt = `
+      Return the output in EXACTLY this format (single line, comma separated):
+      <Title>, <Genre>, <Time to read>, <Full Story Body>
+
+      Rules:
+      - Do not include labels like "Title:" or "Genre:" or "Time to read:".
+      - Title should be catchy but relevant.
+      - Title must NOT be wrapped in quotation marks or quotes.
+      - Genre should be ONE word only (e.g., Fantasy, Romance, Drama).
+      - Time to read should be like "2 min read".
+      - After the third comma, give the full story narrative built from the conversation.
+      - Do not add extra line breaks or commentary before or after.
+      - Do not include potential story titles.
+    `.trim();
+
+    const enhancementPrompt =
+      `${conversationPart}\n\nNarrative Instructions:${basePrompt}\n\nLayout & Framework Instructions:${frameworkPrompt}`.trim();
+
+    const completion = await getOpenAI().chat.completions.create({
+      model: "gpt-4",
+      messages: [{ role: "user", content: enhancementPrompt }],
+      temperature: 0.8,
+    });
+
+    let enhancedStory = completion.choices?.[0]?.message?.content;
+    if (!enhancedStory) {
+      return res.status(500).json({
+        message: "AI failed to return the story",
+        response: null,
+        error: "AI returned no content",
+      });
+    }
+
+    if (enhancedStory.startsWith(`"`)) enhancedStory = enhancedStory.slice(1);
+    if (enhancedStory.endsWith(`"`)) enhancedStory = enhancedStory.slice(0, -1);
+
+    const parts = enhancedStory.split(",");
+    const title = (parts[0]?.trim() || "")?.replace(/^["']|["']$/g, "");
+    const genre = (parts[1]?.trim() || "")?.replace(/^["']|["']$/g, "");
+    const timeRead = (parts[2]?.trim() || "")?.replace(/^["']|["']$/g, "");
+    const storyBody = parts.slice(3).join(",").trim();
+
+    // First shared memory becomes the seed user_story (required by the model).
+    const seedStory = userMessages.map((m) => m.content).join("\n\n").slice(0, 10000);
+
+    const newStory = await Story.create({
+      userId: id,
+      user_story: seedStory,
+      source: "conversation",
+      conversation: normalizedMessages,
+      story_title: title,
+      genre,
+      read_time: timeRead,
+      enhanced_story: storyBody,
+      book_version_title: title,
+    });
+
+    if (!user.isPublic) {
+      if (access.subscription) {
+        await Subscription.findOneAndUpdate(
+          { userId: user._id },
+          { $inc: { storiesCreated: 1 } }
+        );
+      }
+
+      const generatedStory = storyBody
+        .replace(/\n\n/g, "<br /><br />")
+        .replace(/\n/g, "<br />");
+      const dynamicData = {
+        subject: "Story generated successfully",
+        to_email: email,
+      };
+      const emailTemplate = await generateStoryEmail(generatedStory);
+      await sendMail(emailTemplate, dynamicData);
+    }
+
+    return res.status(201).json({
+      message: "Story generated successfully",
+      response: { storyId: newStory._id },
+      error: null,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Internal server error",
+      response: null,
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   createStory,
   generateStory,
@@ -635,4 +937,6 @@ module.exports = {
   deleteStory,
   seedMockStoriesForMe,
   transcribeAudio,
+  chatMemory,
+  generateStoryFromConversation,
 };

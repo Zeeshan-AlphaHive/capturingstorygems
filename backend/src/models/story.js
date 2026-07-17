@@ -23,6 +23,26 @@ const storySchema = new Schema(
         },
       },
     ],
+    // How this story was created: guided clarity questions or the deep memory conversation.
+    source: {
+      type: String,
+      enum: ["clarity", "conversation"],
+      default: "clarity",
+    },
+    // Full back-and-forth transcript for the Guided Memory Experience (conversation mode).
+    conversation: [
+      {
+        role: {
+          type: String,
+          enum: ["user", "assistant"],
+          required: true,
+        },
+        content: {
+          type: String,
+          default: "",
+        },
+      },
+    ],
     // hero image for the story
     heroImageUrl: {
       type: String,
