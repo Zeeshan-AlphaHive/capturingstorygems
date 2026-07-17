@@ -190,8 +190,11 @@ export default function StoryPromptModal({
 
   return (
     <PrivateRoute>
-      <div className="fixed inset-0 z-50 flex items-center justify-center px-4 animate-fade-in">
-        <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl relative overflow-hidden animate-scale-in border border-[#A8DADC]">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in">
+        <div
+          style={{ scrollbarWidth: "none" }}
+          className="bg-white w-full max-w-md max-h-[95vh] overflow-y-auto [&::-webkit-scrollbar]:hidden rounded-2xl shadow-2xl relative animate-scale-in border border-[#A8DADC]"
+        >
           {/* Close Button */}
           <button
             onClick={onClose}

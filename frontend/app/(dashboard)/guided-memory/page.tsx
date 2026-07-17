@@ -67,6 +67,7 @@ export default function GuidedMemory() {
   });
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   const { isRecording, recordingTime, startRecording, stopRecording } =
     useAudioRecorder();
@@ -80,6 +81,14 @@ export default function GuidedMemory() {
       behavior: "smooth",
     });
   }, [messages, isSending]);
+
+  useEffect(() => {
+    const textarea = inputRef.current;
+    if (!textarea) return;
+
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 192)}px`;
+  }, [input]);
 
   const handleSend = async () => {
     const text = input.trim();
@@ -417,13 +426,14 @@ export default function GuidedMemory() {
             <div className="flex items-end gap-2">
               <div className="relative flex-1">
                 <textarea
+                  ref={inputRef}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   disabled={isRecording}
                   placeholder="Share whatever you'd like about your memory..."
                   rows={1}
-                  className="w-full resize-none max-h-40 p-3 pr-12 text-gray-800 bg-[#F1FAEE] border border-[#A8DADC] rounded-2xl placeholder-gray-400 text-sm leading-relaxed focus:outline-none focus:border-[#457B9D] focus:ring-4 focus:ring-[#A8DADC]/50 transition-all duration-200"
+                  className="w-full min-h-12 max-h-48 resize-none overflow-y-auto p-3 pr-12 text-gray-800 bg-[#F1FAEE] border border-[#A8DADC] rounded-2xl placeholder-gray-400 text-sm leading-relaxed focus:outline-none focus:border-[#457B9D] focus:ring-4 focus:ring-[#A8DADC]/50 transition-[border-color,box-shadow] duration-200"
                 />
                 <button
                   onClick={handleMicToggle}
