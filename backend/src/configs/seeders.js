@@ -1,5 +1,6 @@
 const Prompt = require("../models/prompt");
 const Admin = require("../models/admin");
+const MEMORY_CONVERSATION_PROMPT_DEFAULT = require("../data/prompts/memoryConversationPrompt");
 
 const runSeeder = async () => {
   try {
@@ -46,10 +47,23 @@ const runSeeder = async () => {
             - Final output **must not exceed 1000 characters**, including spaces and punctuation.
             - The result should feel timeless, emotionally rich, and worthy of remembrance.`,
         },
+        {
+          name: "memory-conversation-prompt",
+          prompt: MEMORY_CONVERSATION_PROMPT_DEFAULT,
+        },
       ]);
       console.log("Prompts seeded successfully!");
     } else {
       console.log("Prompts already exist, skipping seeding");
+    }
+
+    const memoryPrompt = await Prompt.findOne({ name: "memory-conversation-prompt" });
+    if (!memoryPrompt) {
+      await Prompt.create({
+        name: "memory-conversation-prompt",
+        prompt: MEMORY_CONVERSATION_PROMPT_DEFAULT,
+      });
+      console.log("memory-conversation-prompt added to existing prompts");
     }
 
     const adminCount = await Admin.countDocuments();

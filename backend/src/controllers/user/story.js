@@ -4,6 +4,7 @@ const Story = require("../../models/story.js");
 const Prompt = require("../../models/prompt.js");
 const Subscription = require("../../models/subscription.js");
 const { getOpenAI } = require("../../configs/openai.js");
+const { configurations } = require("../../configs/config.js");
 const { generateStoryEmail } = require("../../data/emails.js");
 const { sendMail } = require("../../utils/send-mail.js");
 const cloudinary = require("../../configs/cloudinary.util.js");
@@ -13,41 +14,7 @@ const {
 } = require("../../utils/storyAccess.js");
 
 // ── Guided Memory Experience (conversation mode) ──────────────────
-// Default operational prompt used when no "memory-conversation-prompt" exists in the DB.
-// Admins can override this by creating/editing a Prompt named "memory-conversation-prompt".
-const DEFAULT_MEMORY_CONVERSATION_PROMPT = `
-You are the gentle memory guide for Capturing Story Gems (CSG). You help a storyteller
-rediscover a meaningful memory through a warm, unhurried conversation.
-
-The Central Operating Question
-Before every response silently ask:
-"What experience will best serve this storyteller right now?"
-Never ask: What question comes next? What information is missing? How do I keep the conversation going?
-Instead ask: What would help them reconnect? What would help this memory become clearer?
-What would help them notice something meaningful? What would build confidence?
-What would help them preserve authenticity?
-Every response should improve the storyteller's experience.
-
-Guided Memory Experience — every meaningful memory naturally moves through five gentle stages:
-Notice → Reconnect → Explore → Recognize → Preserve.
-Do not force movement. Follow the storyteller's pace.
-
-Conversation Style — every conversation should feel like walking beside someone, not interviewing them:
-- Observe before questioning.
-- Reflect before exploring.
-- Invite before directing.
-- Recognize before summarizing.
-- Offer choices frequently.
-- Allow pauses, unfinished thoughts, and silence.
-- Thoughtful observations are often more valuable than additional questions.
-- Keep replies short, warm, and human (usually 2–5 sentences). Ask at most one gentle question at a time.
-
-Throughout the experience, quietly notice whether Story Gems are beginning to emerge.
-Allow the storyteller to discover them first. If appropriate, gently reflect what seems to be emerging.
-When the memory feels rich and complete, gently let them know it seems ready, and remind them
-they can select "Create My Story" whenever they feel ready — never pressure them.
-`.trim();
-
+// Operational prompt is stored in DB as "memory-conversation-prompt" (editable in Admin → Prompts).
 const MEMORY_STATUS_INSTRUCTION = `
 After your conversational reply, append a private machine-readable status block in EXACTLY this format:
 <STORY_STATUS>{"progress":35,"covered":["setting"],"remaining":["emotions","meaning"],"ready":false,"summary":"The setting is clear; the emotional meaning still needs exploration."}</STORY_STATUS>
@@ -142,7 +109,7 @@ const createStory = async (req, res) => {
     const prompt = `${promptDoc.prompt}\n"${story}"`;
 
     const completion = await getOpenAI().chat.completions.create({
-      model: "gpt-4",
+      model: configurations.openAiChatModel,
       messages: [{ role: "user", content: prompt }],
       temperature: 0.7,
     });
@@ -260,7 +227,7 @@ const generateStory = async (req, res) => {
       `${storyPart}\n\n${qaPart}\n\nNarrative Instructions:${basePrompt}\n\nLayout & Framework Instructions:${frameworkPrompt}`.trim();
 
     const completion = await getOpenAI().chat.completions.create({
-      model: "gpt-4",
+      model: configurations.openAiStoryModel,
       messages: [{ role: "user", content: enhancementPrompt }],
       temperature: 0.8,
     });
@@ -748,9 +715,17 @@ const chatMemory = async (req, res) => {
       });
     }
 
-    // Prefer an admin-managed prompt; fall back to the built-in operational prompt.
+    // Load admin-managed operational prompt from the database.
     const promptDoc = await Prompt.findOne({ name: "memory-conversation-prompt" });
-    const systemPrompt = promptDoc?.prompt?.trim() || DEFAULT_MEMORY_CONVERSATION_PROMPT;
+    if (!promptDoc?.prompt?.trim()) {
+      return res.status(404).json({
+        message:
+          "Guided memory prompt not found. Please add memory-conversation-prompt in Admin → Prompts.",
+        response: null,
+        error: "Prompt not found",
+      });
+    }
+    const systemPrompt = promptDoc.prompt.trim();
 
     const chatMessages = [
       { role: "system", content: systemPrompt },
@@ -761,7 +736,7 @@ const chatMemory = async (req, res) => {
     ];
 
     const completion = await getOpenAI().chat.completions.create({
-      model: "gpt-4",
+      model: configurations.openAiChatModel,
       messages: chatMessages,
       temperature: 0.8,
     });
@@ -856,7 +831,7 @@ const generateStoryFromConversation = async (req, res) => {
       `${conversationPart}\n\nNarrative Instructions:${basePrompt}\n\nLayout & Framework Instructions:${frameworkPrompt}`.trim();
 
     const completion = await getOpenAI().chat.completions.create({
-      model: "gpt-4",
+      model: configurations.openAiStoryModel,
       messages: [{ role: "user", content: enhancementPrompt }],
       temperature: 0.8,
     });

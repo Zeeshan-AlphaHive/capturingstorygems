@@ -14,13 +14,14 @@ if (!mongoString) {
     })
     .then(() => {
       console.log("Mongodb connected successfully");
+      runSeeder();
     })
     .catch((error) => {
       console.log("Mongodb connection error:", error);
     });
 }
 
-// runSeeder();
+// runSeeder(); // called after successful connection above
 
 module.exports = mongoose;
 

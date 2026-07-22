@@ -6,6 +6,8 @@ const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
 const googleClientId = process.env.GOOGLE_CLIENT_ID;
 const openAiKey = process.env.OPENAI_API_KEY;
+const openAiChatModel = process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
+const openAiStoryModel = process.env.OPENAI_STORY_MODEL || "gpt-4o";
 
 const gmailUser = process.env.GMAIL_USER;
 const gmailPassword = process.env.GMAIL_PASSWORD;
@@ -20,6 +22,8 @@ const configurations = {
   stripeWebhookSecret,
   googleClientId,
   openAiKey,
+  openAiChatModel,
+  openAiStoryModel,
   gmailUser,
   gmailPassword,
   supportEmail,
