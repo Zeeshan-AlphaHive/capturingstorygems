@@ -238,10 +238,10 @@ export default function StoryPromptModal({
               >
                 <ListChecks className="w-5 h-5 text-[#457B9D]" />
                 <span className="text-sm font-semibold text-[#1D3557]">
-                  Quick Questions
+                  Memory Clarity Qs
                 </span>
                 <span className="text-[11px] leading-tight text-[#5A9AAF]">
-                  Share a draft, answer a few prompts
+                  Share draft... answer clarity questions
                 </span>
               </button>
               <button
@@ -255,10 +255,10 @@ export default function StoryPromptModal({
               >
                 <MessagesSquare className="w-5 h-5 text-[#457B9D]" />
                 <span className="text-sm font-semibold text-[#1D3557]">
-                  Guided Conversation
+                  Memory Discovery Conversation
                 </span>
                 <span className="text-[11px] leading-tight text-[#5A9AAF]">
-                  Rediscover your memory together
+                  Explore memory and uncover meaning
                 </span>
               </button>
             </div>
@@ -266,12 +266,15 @@ export default function StoryPromptModal({
             {flow === "guided" && (
               <div className="animate-fade-in">
                 <div className="p-4 bg-[#F1FAEE] border border-[#A8DADC] rounded-xl mb-5">
+                  <p className="text-sm text-[#1D3557] leading-relaxed mb-3">
+                    <span className="font-semibold">Best if:</span> You want to
+                    rediscover fading memories and uncover deeper layers of
+                    insight, thoughts, feelings, and meaning.
+                  </p>
                   <p className="text-sm text-[#1D3557] leading-relaxed">
-                    A gentle, back-and-forth Guided Memory Experience. Share a
-                    memory, a rough draft, or even just a feeling — and we&apos;ll
-                    explore it together until your story feels ready. When
-                    you&apos;re done, we&apos;ll craft the full story for you to
-                    tweak.
+                    Memory Discovery is like having a caring conversation with
+                    someone who knows how to gently awaken memories. It gently
+                    guides you through different layers of your memory.
                   </p>
                 </div>
                 <Button
@@ -295,7 +298,7 @@ export default function StoryPromptModal({
                 value={story}
                 onChange={(e) => setStory(e.target.value)}
                 disabled={activeMode === "mic"}
-                placeholder="Once upon a time... or perhaps it was just yesterday."
+                placeholder="Type, Paste in, or Verbally use the mic… to enter your draft story into this text box."
                 className="w-full p-4 text-gray-800 bg-[#F1FAEE] border border-[#A8DADC] rounded-xl resize-none placeholder-gray-400 text-sm leading-relaxed focus:outline-none focus:border-[#457B9D] focus:ring-4 focus:ring-[#A8DADC]/50 transition-all duration-200"
                 rows={7}
               />
