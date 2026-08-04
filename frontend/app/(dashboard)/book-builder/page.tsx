@@ -67,6 +67,36 @@ type BookType = {
 
 const DRAFT_BOOK_KEY = "draftBookId";
 
+function getStoryId(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value === "string") {
+    const id = value.trim();
+    return id || null;
+  }
+  if (typeof value === "object") {
+    const obj = value as { _id?: unknown; id?: unknown };
+    if (obj._id != null) return String(obj._id).trim() || null;
+    if (obj.id != null) return String(obj.id).trim() || null;
+  }
+  return null;
+}
+
+function toStoryDisplay(value: unknown): StoryType | null {
+  const id = getStoryId(value);
+  if (!id) return null;
+
+  if (typeof value === "object" && value !== null && "story_title" in value) {
+    return { ...(value as StoryType), _id: id };
+  }
+
+  return {
+    _id: id,
+    story_title: "Untitled story",
+    genre: "",
+    read_time: "",
+  };
+}
+
 function SortableRow({
   story,
   onRemove,
@@ -159,8 +189,8 @@ export default function BookBuilderPage() {
     return items
       .slice()
       .sort((a, b) => a.order - b.order)
-      .map((it) => it.storyId)
-      .filter((s): s is NonNullable<typeof s> => !!s && typeof s === "object" && typeof s._id === "string");
+      .map((it) => toStoryDisplay(it.storyId))
+      .filter((s): s is StoryType => !!s);
   }, [book]);
 
   const storyIds = useMemo(() => storyList.map((s) => s._id), [storyList]);
@@ -175,6 +205,9 @@ export default function BookBuilderPage() {
       }
       const b = await getBook(id, token);
       setBook(b as any);
+      if ((b as any)?._repaired) {
+        toast.info("Book stories were repaired. You can reorder them now.");
+      }
       setDraftTitle((b as any)?.title || "");
       const savedPod = (b as any)?.pod_package_id as string | undefined;
       if (savedPod) {
@@ -189,10 +222,18 @@ export default function BookBuilderPage() {
   };
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const fromQuery = params.get("bookId");
     const saved = localStorage.getItem(DRAFT_BOOK_KEY);
-    if (!saved) return;
-    setBookId(saved);
-    load(saved);
+    const id = fromQuery || saved;
+    if (!id) return;
+
+    if (fromQuery) {
+      localStorage.setItem(DRAFT_BOOK_KEY, fromQuery);
+    }
+
+    setBookId(id);
+    load(id);
   }, []);
 
   const onDragEnd = async (event: DragEndEvent) => {
@@ -203,8 +244,8 @@ export default function BookBuilderPage() {
     const newIndex = storyIds.indexOf(String(over.id));
     if (oldIndex === -1 || newIndex === -1) return;
 
+    const newIds = arrayMove(storyIds, oldIndex, newIndex);
     const newList = arrayMove(storyList, oldIndex, newIndex);
-    const newIds = newList.map((s) => s._id);
 
     // optimistic UI update
     setBook((prev) => {
@@ -221,12 +262,12 @@ export default function BookBuilderPage() {
     try {
       const token = localStorage.getItem("token");
       if (!token || !bookId) return;
-      await reorderBook(bookId, newIds, token);
+      await reorderBook(bookId, newIds.map(String), token);
       toast.success("Order updated");
     } catch (e: any) {
-      toast.error(e?.message || "Reorder failed");
-      // reload to restore correct order
-      if (bookId) load(bookId);
+      const msg = e?.message || "Reorder failed";
+      toast.error(msg);
+      if (bookId) await load(bookId);
     }
   };
 
@@ -268,11 +309,10 @@ export default function BookBuilderPage() {
       const token = localStorage.getItem("token");
       if (!token) return;
       const newIds = newList.map((s) => s._id);
-      await reorderBook(bookId, newIds, token);
+      await reorderBook(bookId, newIds.map(String), token);
       toast.success("Order updated");
     } catch (err: any) {
       toast.error(err?.message || "Failed to update order");
-      // reload to restore
       await load(bookId);
     }
   };

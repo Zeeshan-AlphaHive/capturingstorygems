@@ -50,6 +50,81 @@ const {
 } = require("../../utils/pdfImage.util.js");
 const Book = require("../../models/book.js");
 const Story = require("../../models/story.js");
+const { Types } = require("mongoose");
+
+const normalizeStoryId = (value) => {
+  if (value == null) return "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "object") {
+    if (value._id != null) return String(value._id).trim();
+    if (typeof value.toHexString === "function") return value.toHexString();
+  }
+  const asString = String(value).trim();
+  return asString === "[object Object]" ? "" : asString;
+};
+
+const isValidStoryObjectId = (id) => {
+  if (!id) return false;
+  return Types.ObjectId.isValid(id) && String(new Types.ObjectId(id)) === id;
+};
+
+/** Remove corrupt, duplicate, and orphaned story refs; re-sequence order. */
+const repairBookItems = async (bookDoc) => {
+  const userId = bookDoc.userId;
+  const sorted = (bookDoc.items || [])
+    .slice()
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
+  const seen = new Set();
+  const candidateIds = [];
+
+  for (const item of sorted) {
+    const id = normalizeStoryId(item.storyId);
+    if (!isValidStoryObjectId(id) || seen.has(id)) continue;
+    seen.add(id);
+    candidateIds.push(id);
+  }
+
+  let validIds = candidateIds;
+  if (candidateIds.length > 0) {
+    const existingStories = await Story.find({
+      _id: { $in: candidateIds },
+      userId,
+    })
+      .select("_id")
+      .lean();
+
+    const validSet = new Set(existingStories.map((story) => String(story._id)));
+    validIds = candidateIds.filter((id) => validSet.has(id));
+  }
+
+  const repairedItems = validIds.map((storyId, idx) => ({
+    storyId,
+    order: idx + 1,
+  }));
+
+  const before = JSON.stringify(
+    (bookDoc.items || []).map((item) => ({
+      id: normalizeStoryId(item.storyId),
+      order: item.order,
+    }))
+  );
+  const after = JSON.stringify(
+    repairedItems.map((item) => ({
+      id: normalizeStoryId(item.storyId),
+      order: item.order,
+    }))
+  );
+
+  bookDoc.items = repairedItems;
+  return before !== after;
+};
+
+const sameStoryIdSet = (left, right) => {
+  if (left.length !== right.length) return false;
+  const rightSet = new Set(right);
+  return left.every((id) => rightSet.has(id));
+};
 
 // ── pdf-lib helpers ──────────────────────────────────────────────
 const PTS_PER_INCH = 72; // 1 inch = 72 PDF points
@@ -208,10 +283,7 @@ const getBook = async (req, res) => {
     const { id: userId } = req.decoded;
     const { bookId } = req.params;
 
-    const book = await Book.findOne({ _id: bookId, userId })
-      .populate("items.storyId", "story_title genre read_time enhanced_story heroImageUrl")
-      .lean();
-
+    const book = await Book.findOne({ _id: bookId, userId });
     if (!book) {
       return res.status(404).json({
         message: "Book not found",
@@ -220,12 +292,23 @@ const getBook = async (req, res) => {
       });
     }
 
-    // sort items by order
-    book.items = (book.items || []).sort((a, b) => a.order - b.order);
+    const repaired = await repairBookItems(book);
+    if (repaired) await book.save();
+
+    await book.populate(
+      "items.storyId",
+      "story_title genre read_time enhanced_story heroImageUrl"
+    );
+
+    const bookData = book.toObject();
+    bookData.items = (bookData.items || [])
+      .filter((it) => it.storyId)
+      .sort((a, b) => a.order - b.order);
+    if (repaired) bookData._repaired = true;
 
     return res.status(200).json({
       message: "Book fetched successfully",
-      response: { data: book },
+      response: { data: bookData },
       error: null,
     });
   } catch (err) {
@@ -252,7 +335,9 @@ const addStoryToBook = async (req, res) => {
     const story = await Story.findOne({ _id: storyId, userId }).select("_id");
     if (!story) return res.status(404).json({ message: "Story not found", error: "Story not found" });
 
-    const alreadyExists = book.items.some((it) => it.storyId.toString() === storyId.toString());
+    const alreadyExists = book.items.some(
+      (it) => normalizeStoryId(it.storyId) === normalizeStoryId(storyId)
+    );
     if (alreadyExists) return res.status(409).json({ message: "Story already added", error: "Duplicate story" });
 
     const nextOrder = book.items.length ? Math.max(...book.items.map((i) => i.order)) + 1 : 1;
@@ -277,7 +362,9 @@ const removeStoryFromBook = async (req, res) => {
     if (!book) return res.status(404).json({ message: "Book not found", error: "Book not found" });
 
     const before = book.items.length;
-    book.items = book.items.filter((it) => it.storyId.toString() !== storyId.toString());
+    book.items = book.items.filter(
+      (it) => normalizeStoryId(it.storyId) !== normalizeStoryId(storyId)
+    );
 
     if (book.items.length === before) return res.status(404).json({ message: "Story not found in book", error: "Story not found" });
 
@@ -305,14 +392,23 @@ const reorderBookItems = async (req, res) => {
     const book = await Book.findOne({ _id: bookId, userId });
     if (!book) return res.status(404).json({ message: "Book not found", error: "Book not found" });
 
-    const existingIds = book.items.map((it) => it.storyId.toString()).sort();
-    const incomingIds = storyIds.map(String).sort();
+    const repaired = await repairBookItems(book);
+    if (repaired) await book.save();
 
-    if (existingIds.join(",") !== incomingIds.join(",")) {
-      return res.status(400).json({ message: "storyIds must match book contents", error: "Invalid reorder" });
+    const existingIds = book.items
+      .map((it) => normalizeStoryId(it.storyId))
+      .filter(Boolean);
+    const incomingIds = storyIds.map(normalizeStoryId).filter(Boolean);
+
+    if (!sameStoryIdSet(existingIds, incomingIds)) {
+      return res.status(409).json({
+        message: "Book contents changed. Refresh the page and try reordering again.",
+        error: "Invalid reorder",
+        response: { needsRefresh: true },
+      });
     }
 
-    book.items = storyIds.map((sid, idx) => ({ storyId: sid, order: idx + 1 }));
+    book.items = incomingIds.map((sid, idx) => ({ storyId: sid, order: idx + 1 }));
     await book.save();
 
     return res.status(200).json({ message: "Book reordered", error: null });
