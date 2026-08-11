@@ -5,6 +5,9 @@ const Prompt = require("../../models/prompt.js");
 const Subscription = require("../../models/subscription.js");
 const { getOpenAI } = require("../../configs/openai.js");
 const { configurations } = require("../../configs/config.js");
+const {
+  truncateToMaxWords,
+} = require("../../utils/storyLimits.js");
 const { generateStoryEmail } = require("../../data/emails.js");
 const { sendMail } = require("../../utils/send-mail.js");
 const cloudinary = require("../../configs/cloudinary.util.js");
@@ -855,7 +858,9 @@ const generateStoryFromConversation = async (req, res) => {
     const storyBody = parts.slice(3).join(",").trim();
 
     // First shared memory becomes the seed user_story (required by the model).
-    const seedStory = userMessages.map((m) => m.content).join("\n\n").slice(0, 10000);
+    const seedStory = truncateToMaxWords(
+      userMessages.map((m) => m.content).join("\n\n")
+    );
 
     const newStory = await Story.create({
       userId: id,

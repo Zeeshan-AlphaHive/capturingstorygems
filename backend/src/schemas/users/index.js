@@ -1,6 +1,8 @@
 const Joi = require("joi");
-
- 
+const {
+  storyWordLimitRule,
+  storyWordLimitMessages,
+} = require("../../utils/storyLimits.js");
 
 module.exports = {
   userRegisterSchema: Joi.object({
@@ -336,11 +338,14 @@ module.exports = {
   }),
 
   storySchema: Joi.object({
-    story: Joi.string().max(10000).required().messages({
-      "any.required": "Story is required",
-      "string.empty": "Story cannot be empty",
-      "string.max": "Story cannot exceed 10,000 characters",
-    }),
+    story: Joi.string()
+      .required()
+      .custom(storyWordLimitRule)
+      .messages({
+        ...storyWordLimitMessages,
+        "any.required": "Story is required",
+        "string.empty": "Story cannot be empty",
+      }),
   }),
 
   storyChatSchema: Joi.object({
@@ -366,9 +371,10 @@ module.exports = {
   }),
 
   reviseStorySchema: Joi.object({
-  story: Joi.string().max(10000).optional().messages({
-    "string.max": "Story cannot exceed 10,000 characters",
-  }),
+  story: Joi.string()
+    .optional()
+    .custom(storyWordLimitRule)
+    .messages(storyWordLimitMessages),
 
   story_title: Joi.string().min(1).max(120).optional().messages({
     "string.min": "Title cannot be empty",
