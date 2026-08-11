@@ -30,6 +30,7 @@ import {
   getMyBooks,
   BookSummary,
 } from "@/utils/bookDraft";
+import { MAX_STORY_WORDS, countWords, formatWordCount } from "@/utils/storyLimits";
 const serverBaseUrl = process.env.NEXT_PUBLIC_BACKEND_SERVER_URL;
 
 type Story = {
@@ -1233,7 +1234,10 @@ const Story = () => {
                   >
                     {editedStory.length > 0 && "Great start!"}
                   </span>
-                  <span>{editedStory.length}/10,000</span>
+                  <span>
+                    {formatWordCount(countWords(editedStory))}/
+                    {formatWordCount(MAX_STORY_WORDS)} words
+                  </span>
                 </div>
 
                 <div className="flex flex-col sm:flex-row gap-3 mt-5">

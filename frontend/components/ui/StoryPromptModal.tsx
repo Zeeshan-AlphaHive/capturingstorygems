@@ -10,6 +10,7 @@ import { handleSessionExpiry } from "@/utils/handleSessionExpiry";
 import { toast } from "sonner";
 import { PrivateRoute } from "@/utils/RouteProtection";
 import TrialBanner from "@/components/ui/TrialBanner";
+import { MAX_STORY_WORDS, countWords, formatWordCount } from "@/utils/storyLimits";
 const serverBaseUrl = process.env.NEXT_PUBLIC_BACKEND_SERVER_URL;
 
 interface StoryPromptModalProps {
@@ -348,7 +349,10 @@ export default function StoryPromptModal({
                 )}
               </div>
               <div className="flex justify-between items-center px-1 text-xs text-gray-500">
-                <span>{story.length}/10,000</span>
+                <span>
+                  {formatWordCount(countWords(story))}/
+                  {formatWordCount(MAX_STORY_WORDS)} words
+                </span>
               </div>
             </div>
 
