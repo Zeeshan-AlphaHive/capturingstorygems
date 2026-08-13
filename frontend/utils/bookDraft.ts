@@ -99,18 +99,20 @@ export async function generateBookPdf(
   coverWidth?: string,
   coverHeight?: string,
   coverUnit?: string,
-  coverImage?: string, // data URL or external URL
-  authorName?: string,
-  audioFile?: string, // base64 data URL for optional audio
+  coverImage?: string | null, // data URL, external URL, or null to clear
+  authorName?: string | null,
+  audioFile?: string | null, // base64 data URL, saved URL, or null to clear
+  audioFileName?: string | null,
 ) {
   const body: any = {};
   if (podPackageId) body.pod_package_id = podPackageId;
   if (coverWidth) body.cover_width = coverWidth;
   if (coverHeight) body.cover_height = coverHeight;
   if (coverUnit) body.cover_unit = coverUnit;
-  if (coverImage) body.cover_image = coverImage;
-  if (authorName) body.author_name = authorName;
-  if (audioFile) body.audio_file = audioFile;
+  if (coverImage !== undefined) body.cover_image = coverImage;
+  if (authorName !== undefined) body.author_name = authorName;
+  if (audioFile !== undefined) body.audio_file = audioFile;
+  if (audioFileName !== undefined) body.audio_file_name = audioFileName;
 
   const res = await fetch(`${serverBaseUrl}/user/book/${bookId}/generate-pdf`, {
     method: "POST",

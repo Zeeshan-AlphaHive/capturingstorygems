@@ -48,6 +48,12 @@ coverPdfUrl: { type: String },
     /** Trim code (e.g. 0600X0900) extracted from pod_package_id at generation time */
     pdf_trim_code: { type: String, default: null },
 
+    /** Last used title-page / cover options (persisted for regenerate UX) */
+    authorName: { type: String, default: null },
+    coverImageUrl: { type: String, default: null },
+    audioUrl: { type: String, default: null },
+    audioFileName: { type: String, default: null },
+
     items: [bookItemSchema],
   },
   { timestamps: true }
