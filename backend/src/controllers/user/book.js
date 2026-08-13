@@ -724,12 +724,64 @@ const generateBookPdf = async (req, res) => {
       return 1 + Math.ceil((totalLines - FIRST_PAGE_LINES) / LINES_PER_PAGE);
     });
 
+    // Upload audio early (if provided) so we can place the QR page after the TOC
+    // and keep TOC story page numbers accurate.
+    // Accepts a new data URL or reuses a previously saved Cloudinary URL.
+    let audioUrl = book.audioUrl || undefined;
+    let qrImage = null;
+    let audioFileNameToSave = book.audioFileName || undefined;
+    const reqAudioFileName =
+      (req.body && (req.body.audio_file_name || req.body.audioFileName)) || undefined;
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "audio_file")) {
+      if (!reqAudioFile || String(reqAudioFile).trim().length === 0) {
+        audioUrl = undefined;
+        audioFileNameToSave = undefined;
+      } else if (/^https?:\/\//i.test(String(reqAudioFile).trim())) {
+        audioUrl = String(reqAudioFile).trim();
+        if (reqAudioFileName) audioFileNameToSave = String(reqAudioFileName).trim();
+      } else {
+        try {
+          const audioUploadRes = await cloudinary.uploader.upload(reqAudioFile, {
+            resource_type: "video",
+            folder: "book_audio",
+            public_id: `audio-${book._id}-${Date.now()}`,
+          });
+          audioUrl = audioUploadRes.secure_url;
+          audioFileNameToSave = reqAudioFileName
+            ? String(reqAudioFileName).trim()
+            : book.audioFileName || "audio";
+          console.log("Audio uploaded to Cloudinary:", audioUrl);
+        } catch (audioErr) {
+          console.warn("Failed to process audio file for QR code:", audioErr?.message || audioErr);
+          // Keep previously saved audio if a new upload fails
+          audioUrl = book.audioUrl || undefined;
+        }
+      }
+    }
+
+    if (audioUrl) {
+      try {
+        const qrPngBuffer = await QRCode.toBuffer(audioUrl, {
+          type: "png",
+          width: 300,
+          margin: 2,
+          color: { dark: "#1a1a1a", light: "#ffffff" },
+        });
+        qrImage = await interiorPdf.embedPng(qrPngBuffer);
+      } catch (qrErr) {
+        console.warn("Failed to generate audio QR code:", qrErr?.message || qrErr);
+        qrImage = null;
+      }
+    }
+    const audioQrPages = qrImage ? 1 : 0;
+
     // TOC entries
     const TOC_LINES_PER_PAGE = 28;
     const tocEntryCount = storyChunks.length;
     const tocPageCount = Math.max(1, Math.ceil(tocEntryCount / TOC_LINES_PER_PAGE));
-    // Reserve an extra blank page after the TOC
-    const contentStartPage = pageNum + tocPageCount + 1;
+    // Reserve: TOC pages + optional audio QR page + blank separator, then stories
+    const contentStartPage = pageNum + tocPageCount + audioQrPages + 1;
 
     const tocData = [];
     let runningPage = contentStartPage;
@@ -738,8 +790,9 @@ const generateBookPdf = async (req, res) => {
       runningPage += storyPageCounts[i];
     }
 
-    // include the extra blank TOC separator page in the total
-    const totalPagesWithoutBlanks = 1 + tocPageCount + 1 + storyPageCounts.reduce((a, b) => a + b, 0);
+    // include the optional QR page + blank TOC separator page in the total
+    const totalPagesWithoutBlanks =
+      1 + tocPageCount + audioQrPages + 1 + storyPageCounts.reduce((a, b) => a + b, 0);
 
     // ── TOC PAGES ──
     for (let tp = 0; tp < tocPageCount; tp++) {
@@ -772,7 +825,42 @@ const generateBookPdf = async (req, res) => {
       pageNum++;
     }
 
-    // add an extra blank page after the TOC (acts as a visual separator)
+    // ── AUDIO QR CODE PAGE (optional) — immediately after Table of Contents ──
+    if (qrImage) {
+      const qrPage = interiorPdf.addPage([PAGE_W, PAGE_H]);
+
+      const qrHeading = "Scan to Listen";
+      const qrHeadingSize = 24;
+      const qrHeadingW = serifBold.widthOfTextAtSize(qrHeading, qrHeadingSize);
+      qrPage.drawText(qrHeading, {
+        x: (PAGE_W - qrHeadingW) / 2,
+        y: PAGE_H - MARGIN - qrHeadingSize,
+        size: qrHeadingSize,
+        font: serifBold,
+        color: bodyColor,
+      });
+
+      const qrSubtitle = "Scan this QR code with your phone to hear the audio";
+      const qrSubSize = 11;
+      const qrSubW = serifFont.widthOfTextAtSize(qrSubtitle, qrSubSize);
+      qrPage.drawText(qrSubtitle, {
+        x: (PAGE_W - qrSubW) / 2,
+        y: PAGE_H - MARGIN - qrHeadingSize - 28,
+        size: qrSubSize,
+        font: serifFont,
+        color: grayColor,
+      });
+
+      const qrDrawSize = Math.min(250, CONTENT_W * 0.5);
+      const qrX = (PAGE_W - qrDrawSize) / 2;
+      const qrY = (PAGE_H - qrDrawSize) / 2 - 10;
+      qrPage.drawImage(qrImage, { x: qrX, y: qrY, width: qrDrawSize, height: qrDrawSize });
+
+      drawPageNumber(qrPage, pageNum, serifFont);
+      pageNum++;
+    }
+
+    // add an extra blank page after the TOC / QR (acts as a visual separator)
     const blankAfterToc = interiorPdf.addPage([PAGE_W, PAGE_H]);
     // (no content) just draw the page number
     drawPageNumber(blankAfterToc, pageNum, serifFont);
@@ -956,69 +1044,6 @@ const generateBookPdf = async (req, res) => {
       pageNum++;
     }
 
-    // ── AUDIO QR CODE PAGE (optional) ──
-    let audioUrl = undefined;
-    if (reqAudioFile && typeof reqAudioFile === 'string' && reqAudioFile.trim().length > 0) {
-      try {
-        // Upload audio to Cloudinary (resource_type "video" handles audio too)
-        const audioUploadRes = await cloudinary.uploader.upload(reqAudioFile, {
-          resource_type: "video",
-          folder: "book_audio",
-          public_id: `audio-${book._id}-${Date.now()}`,
-        });
-        audioUrl = audioUploadRes.secure_url;
-        console.log('Audio uploaded to Cloudinary:', audioUrl);
-
-        // Generate QR code as PNG buffer
-        const qrPngBuffer = await QRCode.toBuffer(audioUrl, {
-          type: 'png',
-          width: 300,
-          margin: 2,
-          color: { dark: '#1a1a1a', light: '#ffffff' },
-        });
-
-        // Embed QR code in PDF
-        const qrImage = await interiorPdf.embedPng(qrPngBuffer);
-        const qrPage = interiorPdf.addPage([PAGE_W, PAGE_H]);
-
-        // Draw heading
-        const qrHeading = "Scan to Listen";
-        const qrHeadingSize = 24;
-        const qrHeadingW = serifBold.widthOfTextAtSize(qrHeading, qrHeadingSize);
-        qrPage.drawText(qrHeading, {
-          x: (PAGE_W - qrHeadingW) / 2,
-          y: PAGE_H - MARGIN - qrHeadingSize,
-          size: qrHeadingSize,
-          font: serifBold,
-          color: bodyColor,
-        });
-
-        // Draw subtitle
-        const qrSubtitle = "Scan this QR code with your phone to hear the audio";
-        const qrSubSize = 11;
-        const qrSubW = serifFont.widthOfTextAtSize(qrSubtitle, qrSubSize);
-        qrPage.drawText(qrSubtitle, {
-          x: (PAGE_W - qrSubW) / 2,
-          y: PAGE_H - MARGIN - qrHeadingSize - 28,
-          size: qrSubSize,
-          font: serifFont,
-          color: grayColor,
-        });
-
-        // Draw QR code centered
-        const qrDrawSize = Math.min(250, CONTENT_W * 0.5);
-        const qrX = (PAGE_W - qrDrawSize) / 2;
-        const qrY = (PAGE_H - qrDrawSize) / 2 - 10;
-        qrPage.drawImage(qrImage, { x: qrX, y: qrY, width: qrDrawSize, height: qrDrawSize });
-
-        drawPageNumber(qrPage, pageNum, serifFont);
-        pageNum++;
-      } catch (audioErr) {
-        console.warn('Failed to process audio file for QR code:', audioErr?.message || audioErr);
-        // Continue without QR — don't fail the entire PDF generation
-      }
-    }
-
     // ── Ensure an even number of interior pages ──
     // If odd, append a blank page so printed books have correct spreads.
     try {
@@ -1074,14 +1099,23 @@ const generateBookPdf = async (req, res) => {
 
     console.log(`Cover dimensions: ${coverWidthIn}in x ${coverHeightIn}in`);
 
-    // Upload cover image to Cloudinary if provided
-    let coverImageUrl = undefined;
-    if (typeof reqCoverImage === 'string' && reqCoverImage.trim().length > 0) {
-      try {
-        const uploadRes = await cloudinary.uploader.upload(reqCoverImage, { folder: "book_covers" });
-        coverImageUrl = uploadRes.secure_url;
-      } catch (e) {
-        console.warn('Cover image upload failed, continuing without image', e.message);
+    // Resolve cover image: new upload, reuse saved URL, or clear
+    let coverImageUrl = book.coverImageUrl || undefined;
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "cover_image")) {
+      if (!reqCoverImage || String(reqCoverImage).trim().length === 0) {
+        coverImageUrl = undefined;
+      } else if (/^https?:\/\//i.test(String(reqCoverImage).trim())) {
+        coverImageUrl = String(reqCoverImage).trim();
+      } else {
+        try {
+          const uploadRes = await cloudinary.uploader.upload(reqCoverImage, {
+            folder: "book_covers",
+          });
+          coverImageUrl = uploadRes.secure_url;
+        } catch (e) {
+          console.warn("Cover image upload failed, continuing without image", e.message);
+          coverImageUrl = book.coverImageUrl || undefined;
+        }
       }
     }
 
@@ -1245,6 +1279,19 @@ const generateBookPdf = async (req, res) => {
     book.pdf_trim_code = trimResolved.trimCode;
     book.status = "pdf_generated";
     book.pdfGeneratedAt = new Date();
+
+    // Persist regenerate options so the modal can preload next time
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "author_name")) {
+      const cleanedAuthor =
+        typeof reqAuthorName === "string" && reqAuthorName.trim().length > 0
+          ? reqAuthorName.trim()
+          : null;
+      book.authorName = cleanedAuthor;
+    }
+    book.coverImageUrl = coverImageUrl || null;
+    book.audioUrl = audioUrl || null;
+    book.audioFileName = audioUrl ? audioFileNameToSave || book.audioFileName || "audio" : null;
+
     await book.save();
 
     const pageSize = getExpectedPageSizePoints(podPackage);
@@ -1257,6 +1304,10 @@ const generateBookPdf = async (req, res) => {
           coverPdfUrl: book.coverPdfUrl,
           pod_package_id: book.pod_package_id,
           pdf_trim_code: book.pdf_trim_code,
+          authorName: book.authorName,
+          coverImageUrl: book.coverImageUrl,
+          audioUrl: book.audioUrl,
+          audioFileName: book.audioFileName,
           page_size_inches: pageSize
             ? { width: pageSize.widthIn, height: pageSize.heightIn }
             : undefined,

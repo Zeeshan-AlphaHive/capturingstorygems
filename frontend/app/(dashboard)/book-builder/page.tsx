@@ -63,9 +63,18 @@ type BookType = {
   coverPdfUrl?: string;
   pod_package_id?: string;
   pdf_trim_code?: string;
+  authorName?: string | null;
+  coverImageUrl?: string | null;
+  audioUrl?: string | null;
+  audioFileName?: string | null;
 };
 
 const DRAFT_BOOK_KEY = "draftBookId";
+
+function stripAuthorPrefix(name?: string | null): string {
+  if (!name) return "";
+  return String(name).replace(/^by\s+/i, "").trim();
+}
 
 function getStoryId(value: unknown): string | null {
   if (value == null) return null;
@@ -209,6 +218,16 @@ export default function BookBuilderPage() {
         toast.info("Book stories were repaired. You can reorder them now.");
       }
       setDraftTitle((b as any)?.title || "");
+      setCoverAuthor(stripAuthorPrefix((b as any)?.authorName));
+      setSavedCoverImageUrl((b as any)?.coverImageUrl || null);
+      setCoverPreview((b as any)?.coverImageUrl || null);
+      setCoverFile(null);
+      setSavedAudioUrl((b as any)?.audioUrl || null);
+      setAudioFileName(
+        (b as any)?.audioFileName ||
+          ((b as any)?.audioUrl ? "Saved audio" : null),
+      );
+      setAudioFile(null);
       const savedPod = (b as any)?.pod_package_id as string | undefined;
       if (savedPod) {
         const savedTrim = extractTrimCodeFromPod(savedPod);
@@ -487,9 +506,11 @@ export default function BookBuilderPage() {
   const [showCoverModal, setShowCoverModal] = useState(false);
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [coverPreview, setCoverPreview] = useState<string | null>(null);
+  const [savedCoverImageUrl, setSavedCoverImageUrl] = useState<string | null>(null);
   const [coverAuthor, setCoverAuthor] = useState<string>("");
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [audioFileName, setAudioFileName] = useState<string | null>(null);
+  const [savedAudioUrl, setSavedAudioUrl] = useState<string | null>(null);
   const [pageCount, setPageCount] = useState<number>(32);
   const [shippingAddress, setShippingAddress] = useState({
     city: "Washington",
@@ -522,7 +543,18 @@ export default function BookBuilderPage() {
 
     if (!requirePaidSubscriptionForPdf()) return;
 
-    // open modal to ask for cover image and author name
+    // Prefill modal from last saved options for this book
+    setCoverAuthor(stripAuthorPrefix(book?.authorName || coverAuthor));
+    setSavedCoverImageUrl(book?.coverImageUrl || savedCoverImageUrl);
+    setCoverPreview(book?.coverImageUrl || coverPreview);
+    setCoverFile(null);
+    setSavedAudioUrl(book?.audioUrl || savedAudioUrl);
+    setAudioFileName(
+      book?.audioFileName ||
+        audioFileName ||
+        (book?.audioUrl || savedAudioUrl ? "Saved audio" : null),
+    );
+    setAudioFile(null);
     setShowCoverModal(true);
   };
 
@@ -552,14 +584,28 @@ export default function BookBuilderPage() {
         return;
       }
 
-      let coverDataUrl: string | undefined = undefined;
+      let coverDataUrl: string | null | undefined = undefined;
       if (coverFile) {
         coverDataUrl = await readFileAsDataUrl(coverFile);
+      } else if (coverPreview) {
+        // Reuse previously saved cover URL
+        coverDataUrl = coverPreview;
+      } else {
+        // Explicitly cleared
+        coverDataUrl = null;
       }
 
-      let audioDataUrl: string | undefined = undefined;
+      let audioDataUrl: string | null | undefined = undefined;
+      let audioName: string | null | undefined = undefined;
       if (audioFile) {
         audioDataUrl = await readFileAsDataUrl(audioFile);
+        audioName = audioFile.name;
+      } else if (savedAudioUrl && audioFileName) {
+        audioDataUrl = savedAudioUrl;
+        audioName = audioFileName;
+      } else {
+        audioDataUrl = null;
+        audioName = null;
       }
 
       const url = await generateBookPdf(
@@ -576,13 +622,12 @@ export default function BookBuilderPage() {
           ? customCoverUnit.trim()
           : undefined,
         coverDataUrl,
-        coverAuthor && coverAuthor.trim() !== ""
-          ? `By ${coverAuthor.trim()}`
-          : undefined,
+        coverAuthor.trim() !== "" ? `By ${coverAuthor.trim()}` : "",
         audioDataUrl,
+        audioName,
       );
       setPdfUrl(url);
-      // refresh book state so `book.pdfUrl` reflects the newly generated PDF
+      // refresh book state so saved cover/author/audio preload next time
       await load(bookId);
       console.log("Generated PDF URL:", url);
       toast.success("PDF generated");
@@ -590,11 +635,6 @@ export default function BookBuilderPage() {
       toast.error(e?.message || "PDF generation failed");
     } finally {
       setGenerating(false);
-      setCoverFile(null);
-      setCoverPreview(null);
-      setCoverAuthor("");
-      setAudioFile(null);
-      setAudioFileName(null);
     }
   };
 
@@ -621,11 +661,16 @@ export default function BookBuilderPage() {
 
   const cancelGenerate = () => {
     setShowCoverModal(false);
+    // Restore last saved options so cancel doesn't wipe them
+    setCoverAuthor(stripAuthorPrefix(book?.authorName));
+    setSavedCoverImageUrl(book?.coverImageUrl || null);
+    setCoverPreview(book?.coverImageUrl || null);
     setCoverFile(null);
-    setCoverPreview(null);
-    setCoverAuthor("");
+    setSavedAudioUrl(book?.audioUrl || null);
+    setAudioFileName(
+      book?.audioFileName || (book?.audioUrl ? "Saved audio" : null),
+    );
     setAudioFile(null);
-    setAudioFileName(null);
   };
 
   const handleAddToCart = async () => {
@@ -1104,7 +1149,10 @@ export default function BookBuilderPage() {
         )}
         {showCoverModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-            <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl relative overflow-hidden border p-6">
+            <div
+              style={{ scrollbarWidth: "none" }}
+              className="bg-white w-full max-w-md max-h-[95vh] overflow-y-auto [&::-webkit-scrollbar]:hidden rounded-2xl shadow-2xl relative border p-6"
+            >
               <h3 className="text-lg font-semibold mb-1">
                 Title Page Cover — Generate PDF
               </h3>
@@ -1199,6 +1247,7 @@ export default function BookBuilderPage() {
                         onClick={() => {
                           setCoverFile(null);
                           setCoverPreview(null);
+                          setSavedCoverImageUrl(null);
                           const el = document.getElementById(
                             "cover-upload",
                           ) as HTMLInputElement | null;
@@ -1264,6 +1313,7 @@ export default function BookBuilderPage() {
                         onClick={() => {
                           setAudioFile(null);
                           setAudioFileName(null);
+                          setSavedAudioUrl(null);
                           const el = document.getElementById(
                             "audio-upload",
                           ) as HTMLInputElement | null;
