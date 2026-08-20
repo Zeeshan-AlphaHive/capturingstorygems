@@ -109,10 +109,12 @@ function toStoryDisplay(value: unknown): StoryType | null {
 function SortableRow({
   story,
   onRemove,
+  onView,
   onMove,
 }: {
   story: StoryType;
   onRemove: (storyId: string) => void;
+  onView: (storyId: string) => void;
   onMove?: (storyId: string, direction: "up" | "down") => void;
 }) {
   const {
@@ -171,6 +173,13 @@ function SortableRow({
           className="text-slate-700 border-slate-200 hover:bg-slate-50"
         >
           ↓
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => onView(story._id)}
+          className="text-slate-700 border-slate-200 hover:bg-slate-50"
+        >
+          View Story
         </Button>
         <Button
           variant="outline"
@@ -343,6 +352,10 @@ export default function BookBuilderPage() {
   const [addingToCart, setAddingToCart] = useState(false);
   const router = useRouter();
   const [hasPaidSubscription, setHasPaidSubscription] = useState(false);
+
+  const handleViewStory = (storyId: string) => {
+    router.push(`/story?storyId=${encodeURIComponent(storyId)}`);
+  };
   const [subscriptionChecked, setSubscriptionChecked] = useState(false);
   const [trialActive, setTrialActive] = useState(false);
   const [trialEndDate, setTrialEndDate] = useState<string | null>(null);
@@ -1463,6 +1476,7 @@ export default function BookBuilderPage() {
                       key={story._id}
                       story={story}
                       onRemove={handleRemove}
+                      onView={handleViewStory}
                       onMove={moveStory}
                     />
                   ))}
