@@ -389,7 +389,9 @@ const Story = () => {
 
   useEffect(() => {
     const getStoryPages = async () => {
-      await loadStoryPages();
+      const params = new URLSearchParams(window.location.search);
+      const storyId = params.get("storyId") || undefined;
+      await loadStoryPages(storyId);
     };
     getStoryPages();
   }, []);
