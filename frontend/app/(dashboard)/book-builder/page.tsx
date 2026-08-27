@@ -872,11 +872,11 @@ export default function BookBuilderPage() {
         );
       }
 
-      // calculate cost
+      // calculate cost — page count is resolved from the generated PDF on the backend
       const costPayload = {
         line_items: [
           {
-            page_count: Number(pageCount),
+            page_count: Number(pageCount) || 1, // backend overrides with actual PDF page count
             pod_package_id: podPackageId,
             quantity: Number(quantity),
           },
@@ -893,6 +893,9 @@ export default function BookBuilderPage() {
       };
 
       const cost = await calculatePrintCost(bookId, token, costPayload);
+      if (cost?.resolved_page_count) {
+        setPageCount(Number(cost.resolved_page_count));
+      }
 
       // compute total
       // const totalTax = Number(cost.total_tax || 0);
@@ -1006,7 +1009,7 @@ export default function BookBuilderPage() {
       const payload = {
         line_items: [
           {
-            page_count: Number(pageCount),
+            page_count: Number(pageCount) || 1, // backend overrides with actual PDF page count
             pod_package_id: podPackageId,
             quantity: Number(quantity),
           },
@@ -1023,6 +1026,9 @@ export default function BookBuilderPage() {
       };
 
       const cost = await calculatePrintCost(bookId, token, payload);
+      if (cost?.resolved_page_count) {
+        setPageCount(Number(cost.resolved_page_count));
+      }
       setCostEstimate(cost);
       toast.success("Cost estimate fetched");
     } catch (e: any) {
@@ -1828,7 +1834,7 @@ export default function BookBuilderPage() {
                     </label>
                     <input
                       className="p-2 border rounded w-full"
-                      placeholder="State (e.g., NY)"
+                      placeholder="WI (not Wisconsin)"
                       value={shippingAddress.state_code}
                       onChange={(e) =>
                         setShippingAddress({
@@ -1837,6 +1843,9 @@ export default function BookBuilderPage() {
                         })
                       }
                     />
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Use the 2-letter code (WI, NY, CA). Full names are converted automatically.
+                    </p>
                   </div>
 
                   <div>

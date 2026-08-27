@@ -1353,6 +1353,138 @@ const checkoutSuccessEmail = async (planName, startDate, expiryDate) => {
   `;
 };
 
+const bookCartAddedEmail = async ({ bookTitle, quantity, totalPrice, currency }) => {
+  const priceLabel =
+    totalPrice != null && Number.isFinite(Number(totalPrice))
+      ? `${currency || "USD"} ${Number(totalPrice).toFixed(2)}`
+      : "Pending checkout";
+  return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <title>Book Added to Cart</title>
+    </head>
+    <body style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f4f4f7; margin: 0; padding: 0;">
+      <div style="max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,0.05);">
+        <div style="background-color: #457B9D; color: white; padding: 24px; text-align: center;">
+          <h1 style="margin: 0; font-size: 22px;">Book Added to Your Cart</h1>
+        </div>
+        <div style="padding: 32px; color: #333333;">
+          <p>Hi there,</p>
+          <p>Your book has been added to your cart and is ready for checkout.</p>
+          <div style="background-color: #F1FAEE; padding: 12px 16px; border-radius: 8px; margin: 16px 0; color: #1D3557;">
+            <strong>Book:</strong> ${bookTitle || "My Keepsake Book"}<br />
+            <strong>Quantity:</strong> ${quantity || 1}<br />
+            <strong>Estimated total:</strong> ${priceLabel}
+          </div>
+          <p>Visit your cart to complete payment and send your book to print.</p>
+          <p style="margin-top: 32px;">— Capturing Story Gems</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+};
+
+const bookPaymentSuccessEmail = async ({ bookTitle, amount, currency }) => {
+  const priceLabel =
+    amount != null && Number.isFinite(Number(amount))
+      ? `${(currency || "usd").toUpperCase()} ${Number(amount).toFixed(2)}`
+      : "Paid";
+  return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <title>Book Payment Successful</title>
+    </head>
+    <body style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f4f4f7; margin: 0; padding: 0;">
+      <div style="max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,0.05);">
+        <div style="background-color: #10b981; color: white; padding: 24px; text-align: center;">
+          <h1 style="margin: 0; font-size: 22px;">Payment Successful</h1>
+        </div>
+        <div style="padding: 32px; color: #333333;">
+          <p>Hi there,</p>
+          <p>We've received your payment for your printed book order.</p>
+          <div style="background-color: #ecfdf5; padding: 12px 16px; border-radius: 8px; margin: 16px 0; color: #065f46;">
+            <strong>Book:</strong> ${bookTitle || "My Keepsake Book"}<br />
+            <strong>Amount paid:</strong> ${priceLabel}
+          </div>
+          <p>You can now return to your cart and click <strong>Send to Print</strong> to submit your book for printing.</p>
+          <p style="margin-top: 32px;">— Capturing Story Gems</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+};
+
+const bookSentToLuluEmail = async ({ bookTitle, printJobId, quantity }) => {
+  return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <title>Book Sent to Print</title>
+    </head>
+    <body style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f4f4f7; margin: 0; padding: 0;">
+      <div style="max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,0.05);">
+        <div style="background-color: #1D3557; color: white; padding: 24px; text-align: center;">
+          <h1 style="margin: 0; font-size: 22px;">Your Book Was Sent to Print</h1>
+        </div>
+        <div style="padding: 32px; color: #333333;">
+          <p>Hi there,</p>
+          <p>Great news — your book has been submitted to our print partner (Lulu).</p>
+          <div style="background-color: #F1FAEE; padding: 12px 16px; border-radius: 8px; margin: 16px 0; color: #1D3557;">
+            <strong>Book:</strong> ${bookTitle || "My Keepsake Book"}<br />
+            <strong>Quantity:</strong> ${quantity || 1}<br />
+            ${printJobId ? `<strong>Print job ID:</strong> ${printJobId}<br />` : ""}
+          </div>
+          <p>We'll email you again when we receive status updates from the printer.</p>
+          <p style="margin-top: 32px;">— Capturing Story Gems</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+};
+
+const bookPrintStatusEmail = async ({ bookTitle, status, printJobId }) => {
+  const statusLabel = status ? String(status).replace(/_/g, " ") : "updated";
+  return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <title>Print Status Update</title>
+    </head>
+    <body style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f4f4f7; margin: 0; padding: 0;">
+      <div style="max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,0.05);">
+        <div style="background-color: #457B9D; color: white; padding: 24px; text-align: center;">
+          <h1 style="margin: 0; font-size: 22px;">Print Status Update</h1>
+        </div>
+        <div style="padding: 32px; color: #333333;">
+          <p>Hi there,</p>
+          <p>We received an update on your printed book order.</p>
+          <div style="background-color: #F1FAEE; padding: 12px 16px; border-radius: 8px; margin: 16px 0; color: #1D3557;">
+            <strong>Book:</strong> ${bookTitle || "My Keepsake Book"}<br />
+            <strong>Status:</strong> ${statusLabel}<br />
+            ${printJobId ? `<strong>Print job ID:</strong> ${printJobId}<br />` : ""}
+          </div>
+          <p>You can also check the latest status in your cart.</p>
+          <p style="margin-top: 32px;">— Capturing Story Gems</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+};
+
 const supportRequestEmail = async (name, email, message) => {
   return `
     <!DOCTYPE html>
@@ -1514,5 +1646,9 @@ module.exports = {
   passwordResetConfirmationEmail,
   generateStoryEmail,
   checkoutSuccessEmail,
+  bookCartAddedEmail,
+  bookPaymentSuccessEmail,
+  bookSentToLuluEmail,
+  bookPrintStatusEmail,
   supportRequestEmail,
 };

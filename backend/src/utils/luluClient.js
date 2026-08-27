@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { formatLuluError } = require('./luluShipping.js');
 
 const luluApiBase = (process.env.LULU_API_BASE_URL || 'https://api.sandbox.lulu.com').replace(/\/+$/, '');
 
@@ -65,15 +66,22 @@ const createPrintJob = async (orderData) => {
 // Calculate print job costs via Lulu API
 const calculatePrintCost = async (payload) => {
   const token = await getValidToken();
-
-  const resp = await axios.post(PRINT_COST_URL, payload, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-  });
-
-  return resp.data;
+  console.log("payload", payload);
+  try {
+    const resp = await axios.post(PRINT_COST_URL, payload, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    return resp.data;
+  } catch (err) {
+    const message = formatLuluError(err);
+    console.error('Lulu cost calculation failed:', message, err.response?.data);
+    const wrapped = new Error(message);
+    wrapped.status = err.response?.status || 400;
+    throw wrapped;
+  }
 };
 
 // Validate an interior PDF (returns validation job/status)

@@ -42,6 +42,8 @@ function ensureFontkitRegistered(pdfDoc) {
 const QRCode = require("qrcode");
 const cloudinary = require("../../configs/cloudinary.util.js");
 const luluClient = require("../../utils/luluClient.js");
+const { normalizeLuluShippingAddress } = require("../../utils/luluShipping.js");
+const { getPdfPageCount } = require("../../utils/pdfPageCount.js");
 const {
   optimizeImageForPdf,
   embedOptsForSize,
@@ -1362,7 +1364,7 @@ const sendToLulu = async (req, res) => {
         },
       ],
       production_delay: typeof production_delay === "number" ? production_delay : undefined,
-      shipping_address,
+      shipping_address: normalizeLuluShippingAddress(shipping_address),
       shipping_level,
     };
 
@@ -1521,17 +1523,28 @@ const calculatePrintCost = async (req, res) => {
       quantity,
     } = req.body || {};
 
+    // Prefer the real page count from the generated interior PDF
+    let resolvedPageCount = 0;
+    if (book.pdfUrl) {
+      resolvedPageCount = await getPdfPageCount(book.pdfUrl);
+      console.log(
+        `Cost estimate: detected ${resolvedPageCount} pages from book PDF ${book.pdfUrl}`
+      );
+    }
+
     // Build payload: accept either full line_items or single-item fields
     let items = Array.isArray(line_items) && line_items.length > 0
       ? line_items
       : undefined;
 
     if (!items) {
-      const pc = Number(page_count);
+      const pc = resolvedPageCount || Number(page_count);
       const qty = Number(quantity);
       if (!pc || !pod_package_id || !qty) {
         return res.status(400).json({
-          message: "Provide either line_items[] or single item fields: page_count, pod_package_id, quantity",
+          message: book.pdfUrl
+            ? "Provide pod_package_id and quantity (page count is taken from the generated PDF)"
+            : "Generate the book PDF first, then provide page_count/pod_package_id/quantity",
           response: null,
           error: "Invalid payload",
         });
@@ -1543,6 +1556,14 @@ const calculatePrintCost = async (req, res) => {
           quantity: qty,
         },
       ];
+    } else if (resolvedPageCount > 0) {
+      // Override client-provided page counts with the actual PDF page count
+      items = items.map((item) => ({
+        ...item,
+        page_count: resolvedPageCount,
+        pod_package_id:
+          item.pod_package_id || pod_package_id || book.pod_package_id,
+      }));
     }
 
     if (!shipping_address || !shipping_option) {
@@ -1553,24 +1574,41 @@ const calculatePrintCost = async (req, res) => {
       });
     }
 
+    if (!items?.[0]?.page_count) {
+      return res.status(400).json({
+        message:
+          "Could not determine PDF page count. Generate the book PDF first, then try ordering again.",
+        response: null,
+        error: "Missing page count",
+      });
+    }
+
     const payload = {
       line_items: items,
-      shipping_address,
+      shipping_address: normalizeLuluShippingAddress(shipping_address),
       shipping_option,
     };
+
+    console.log("Lulu cost payload line_items:", JSON.stringify(payload.line_items));
 
     const cost = await luluClient.calculatePrintCost(payload);
     console.log("Cost estimate response from Lulu:", cost);
 
     return res.status(200).json({
       message: "Cost estimate fetched",
-      response: { data: cost },
+      response: {
+        data: {
+          ...cost,
+          resolved_page_count: items[0].page_count,
+        },
+      },
       error: null,
     });
   } catch (err) {
     console.error("Lulu cost estimate error:", err);
-    return res.status(500).json({
-      message: "Internal server error",
+    const status = err.status && Number(err.status) >= 400 ? err.status : 500;
+    return res.status(status).json({
+      message: err.message || "Failed to calculate print cost",
       response: null,
       error: err.message,
     });

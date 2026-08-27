@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
-// const Order = require('../models/Order'); // Import your Order model
 const Cart = require('../../models/cart');
+const { notifyBookPrintStatus } = require('../../utils/bookOrderEmails.js');
 
 // Endpoint: POST /api/webhooks/lulu
 router.post('/lulu', async (req, res) => {
@@ -22,8 +22,7 @@ router.post('/lulu', async (req, res) => {
 
         console.log("Parsed webhook:", { externalId, printJobId, newStatus });
 
-        // If we have an external_id that maps to our Cart._id, update the Cart statu
-    
+        // If we have an external_id that maps to our Cart._id, update the Cart status
         if (externalId) {
             try {
                 const update = {};
@@ -33,6 +32,12 @@ router.post('/lulu', async (req, res) => {
                 const updated = await Cart.findByIdAndUpdate(externalId, { $set: update }, { new: true });
                 if (updated) {
                     console.log(`✅ Cart ${externalId} updated with status=${update.status}`);
+
+                    // Email the customer about the print status change
+                    notifyBookPrintStatus(updated, {
+                        status: newStatus,
+                        printJobId: printJobId || updated.luluPrintJobId,
+                    }).catch(() => {});
                 } else {
                     console.log(`⚠️ No Cart found with id ${externalId}`);
                 }
