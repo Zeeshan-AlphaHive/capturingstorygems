@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { PrivateRoute } from "@/utils/RouteProtection";
 import { getMyCart } from "@/utils/cartClient";
 import { Button } from "@/components/ui/Button";
@@ -42,6 +43,20 @@ export default function CartPage() {
   
   useEffect(() => {
     refresh();
+
+    const params = new URLSearchParams(window.location.search);
+    const payment = params.get("payment");
+    if (payment === "true") {
+      toast.success("Payment successful! You can now send your book to print.");
+      // Give Stripe webhook a moment to mark the cart paid, then refresh
+      setTimeout(() => {
+        refresh();
+      }, 1500);
+      window.history.replaceState({}, "", "/cart");
+    } else if (payment === "false") {
+      toast.error("Payment was cancelled.");
+      window.history.replaceState({}, "", "/cart");
+    }
   }, []);
 
   return (
@@ -155,12 +170,17 @@ export default function CartPage() {
                           try {
                             setSendingId(it._id);
                             // Create Stripe checkout session for this cart item
+                            const origin = window.location.origin;
                             const res = await fetch(`${serverBaseUrl}/user/cart/${it._id}/checkout`, {
                               method: "POST",
                               headers: {
                                 "Content-Type": "application/json",
                                 Authorization: `Bearer ${token}`,
                               },
+                              body: JSON.stringify({
+                                success_url: `${origin}/cart?payment=true`,
+                                cancel_url: `${origin}/cart?payment=false`,
+                              }),
                             });
                             const data = await res.json();
                             if (!res.ok) throw new Error(data?.message || "Failed to create checkout session");
@@ -170,9 +190,11 @@ export default function CartPage() {
                             const result = await stripe.redirectToCheckout({ sessionId });
                             if (result.error) {
                               console.error(result.error);
+                              toast.error(result.error.message || "Stripe redirect failed");
                             }
                           } catch (e: any) {
                             console.error(e);
+                            toast.error(e?.message || "Failed to start checkout");
                           } finally {
                             setSendingId(null);
                           }
@@ -212,7 +234,7 @@ export default function CartPage() {
                         {sendingId === it._id ? "Sending…" : "Send to Print"}
                       </Button>
                     ) : null}
-                      {it.status === 'ready' && (
+                      {it.status === 'ready' && !it.paymentPaid && (
                         <Button
                           variant="destructive"
                           onClick={async () => {

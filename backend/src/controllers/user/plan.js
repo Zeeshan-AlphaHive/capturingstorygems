@@ -7,6 +7,7 @@ const User = require("../../models/user.js");
 const { configurations } = require("../../configs/config.js");
 const { sendMail } = require("../../utils/send-mail.js");
 const { checkoutSuccessEmail } = require("../../data/emails.js");
+const { notifyBookPaymentSuccess } = require("../../utils/bookOrderEmails.js");
 const cart = require("../../models/cart.js");
 
 let stripeClient;
@@ -356,6 +357,13 @@ const checkoutComplete = async (req, res) => {
           console.log("Printing payment recorded successfully for cart checkout", { transactionId, cartId });
           // mark cart as paid so frontend can show Send-to-Print button
           await cart.updateOne({ _id: cartId }, { $set: { paymentPaid: true, paymentTransactionId: transactionId } });
+
+          const paidCart = await Cart.findById(cartId).lean();
+          notifyBookPaymentSuccess(paidCart || { userId, email: session.customer_email }, {
+            amount,
+            currency: session.currency,
+            transactionId,
+          }).catch(() => {});
         } catch (e) {
           console.error("Failed to record printing payment after checkout:", e);
         }

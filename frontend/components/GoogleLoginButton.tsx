@@ -6,9 +6,13 @@ const serverBaseUrl = process.env.NEXT_PUBLIC_BACKEND_SERVER_URL;
 
 interface GoogleLoginButtonProps {
   acceptedTerms?: boolean;
+  redirectTo?: string | null;
 }
 
-const GoogleLoginButton = ({ acceptedTerms = false }: GoogleLoginButtonProps) => {
+const GoogleLoginButton = ({
+  acceptedTerms = false,
+  redirectTo = null,
+}: GoogleLoginButtonProps) => {
   const router = useRouter();
 
   const handleLoginSuccess = async (credentialResponse: CredentialResponse) => {
@@ -40,6 +44,11 @@ const GoogleLoginButton = ({ acceptedTerms = false }: GoogleLoginButtonProps) =>
           "user",
           JSON.stringify({ email: data.email, public: false })
         );
+
+        if (redirectTo && redirectTo.startsWith("/") && !redirectTo.startsWith("//")) {
+          router.push(redirectTo);
+          return;
+        }
 
         // If no active paid subscription, send to select-plan.
         try {

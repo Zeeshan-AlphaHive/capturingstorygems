@@ -4,11 +4,44 @@ const {
   validatePdfMatchesPodPackage,
   extractTrimCode,
 } = require("../../utils/luluPodConfig.js");
-const axios = require("axios");
-const { PDFDocument } = require("pdf-lib");
+const { normalizeLuluShippingAddress } = require("../../utils/luluShipping.js");
 const Stripe = require("stripe");
 const { configurations } = require("../../configs/config.js");
 const user = require("../../models/user.js");
+const { getPdfPageCount } = require("../../utils/pdfPageCount.js");
+const {
+  notifyBookAddedToCart,
+  notifyBookSentToLulu,
+} = require("../../utils/bookOrderEmails.js");
+
+const ALLOWED_FRONTEND_ORIGINS = [
+  "http://localhost:3000",
+  "http://localhost:3001",
+  "https://capturingstorygems.com",
+  "https://www.capturingstorygems.com",
+  "https://capturingstorygems.vercel.app",
+  "https://ai-story-frontend-ten.vercel.app",
+  "https://ai-story-fe.vercel.app",
+  "https://ai-story-front.vercel.app",
+  "https://ai-story-builder-production.up.railway.app"
+];
+
+function pickCheckoutReturnUrl(requestedUrl, fallbackPath) {
+  const fallbackBase = String(configurations.frontendBaseUrl || "https://capturingstorygems.com").replace(/\/+$/, "");
+  const fallback = `${fallbackBase}${fallbackPath.startsWith("/") ? fallbackPath : `/${fallbackPath}`}`;
+  if (!requestedUrl || typeof requestedUrl !== "string") return fallback;
+
+  try {
+    const parsed = new URL(requestedUrl);
+    const origin = parsed.origin;
+    if (!ALLOWED_FRONTEND_ORIGINS.includes(origin)) return fallback;
+    // Only allow same-site relative destinations under the cart/landing flows
+    if (!parsed.pathname.startsWith("/")) return fallback;
+    return parsed.toString();
+  } catch {
+    return fallback;
+  }
+}
 
 let stripeClient;
 function getStripe() {
@@ -19,40 +52,6 @@ function getStripe() {
     stripeClient = Stripe(configurations.stripeSecretKey);
   }
   return stripeClient;
-}
-
-// helper: get page count from a remote PDF URL
-async function getPdfPageCount(url) {
-  try {
-    const resp = await axios.get(url, { responseType: "arraybuffer" });
-    const ab = resp.data;
-    const buffer = Buffer.isBuffer(ab) ? ab : Buffer.from(ab);
-
-    // Prefer pdf-lib (handles many PDFs reliably)
-    try {
-      const doc = await PDFDocument.load(buffer);
-      const count = doc.getPages().length;
-      if (Number.isFinite(count) && count > 0) return count;
-    } catch (e) {
-      console.warn("pdf-lib failed to read pages:", e?.message || e);
-    }
-
-    // Fallback to pdf-parse
-    try {
-      const pdfParse = require("pdf-parse");
-      const parsed = await pdfParse(buffer);
-      const count = Number(parsed?.numpages || parsed?.numPages || 0);
-      if (Number.isFinite(count) && count > 0) return count;
-    } catch (e) {
-      console.warn("pdf-parse failed to read pages:", e?.message || e);
-    }
-
-    console.warn("Page count detection returned 0 for URL:", url);
-    return 0;
-  } catch (err) {
-    console.error("PDF page count error:", err?.message || err);
-    return 0;
-  }
 }
 
 // POST /user/cart -> create cart item
@@ -136,14 +135,16 @@ const createCartItem = async (req, res) => {
         }
       }
 
+    const normalizedAddress = normalizeLuluShippingAddress(shipping_address);
+
     const cart = await Cart.create({
       userId,
       title: title || undefined,
-      name: name || (shipping_address && shipping_address.name) || undefined,
+      name: name || (normalizedAddress && normalizedAddress.name) || undefined,
       email: email || undefined,
       pdfUrl,
       coverPdfUrl: coverPdfUrl || undefined,
-      shipping_address,
+      shipping_address: normalizedAddress,
       shipping_option: shipping_option || undefined,
       pod_package_id: pod_package_id || undefined,
       trim_code: extractTrimCode(pod_package_id) || dimCheck.trimCode || undefined,
@@ -153,6 +154,9 @@ const createCartItem = async (req, res) => {
       currency: currency || "",
       status: "ready",
     });
+
+    // Notify user (do not fail the request if email fails)
+    notifyBookAddedToCart(cart).catch(() => {});
 
     return res.status(201).json({ message: "Cart item created", response: { data: cart }, error: null });
   } catch (err) {
@@ -238,7 +242,7 @@ const sendCartToPrint = async (req, res) => {
         },
       ],
       production_delay: typeof production_delay === "number" ? production_delay : undefined,
-      shipping_address:cart.shipping_address,
+      shipping_address: normalizeLuluShippingAddress(cart.shipping_address),
       shipping_level:cart.shipping_option || "MAIL",
     };
 
@@ -249,6 +253,10 @@ const sendCartToPrint = async (req, res) => {
     console.log("Print job created:", resp);
     // mark cart as sent
     await Cart.updateOne({ _id: id }, { $set: { status: "sent" } });
+
+    notifyBookSentToLulu(cart, {
+      printJobId: resp?.id || resp?.print_job_id || null,
+    }).catch(() => {});
 
     return res.status(200).json({ message: "Print job created", response: { data: resp } });
   } catch (err) {
@@ -264,7 +272,8 @@ const createCartCheckoutSession = async (req, res) => {
   try {
     const { id: userId, email } = req.decoded;
     const { id } = req.params;
-      const getuser = await user.findById(userId);
+    const { success_url, cancel_url } = req.body || {};
+    const getuser = await user.findById(userId);
     const cart = await Cart.findOne({ _id: id, userId }).lean();
     if (!cart) return res.status(404).json({ message: "Cart item not found" });
     const amount = Number(cart.total_price || 0);
@@ -289,8 +298,9 @@ const createCartCheckoutSession = async (req, res) => {
         cartId: cart._id.toString(),
         userId: userId,
       },
-      success_url: `${configurations.frontendBaseUrl}/cart?payment=true`,
-      cancel_url: `${configurations.frontendBaseUrl}/cart?payment=false`,
+      // Prefer the browser origin so www vs non-www keeps the same localStorage session
+      success_url: pickCheckoutReturnUrl(success_url, "/cart?payment=true"),
+      cancel_url: pickCheckoutReturnUrl(cancel_url, "/cart?payment=false"),
     });
     return res.status(200).json({ message: "Checkout session created", response: { data: { id: session.id } }, error: null });
   } catch (err) {
@@ -331,12 +341,17 @@ const sendCartToPrintById = async (userId, cartId, production_delay) => {
       },
     ],
     production_delay: typeof production_delay === "number" ? production_delay : undefined,
-    shipping_address: cart.shipping_address,
+    shipping_address: normalizeLuluShippingAddress(cart.shipping_address),
     shipping_level: cart.shipping_option || "MAIL",
   };
 
   const resp = await createPrintJob(orderData);
   await Cart.updateOne({ _id: cartId }, { $set: { status: "sent" } });
+
+  notifyBookSentToLulu(cart, {
+    printJobId: resp?.id || resp?.print_job_id || null,
+  }).catch(() => {});
+
   return resp;
 };
 
@@ -350,6 +365,13 @@ const deleteCartItem = async (req, res) => {
 
     const cart = await Cart.findOne({ _id: id, userId });
     if (!cart) return res.status(404).json({ message: "Cart item not found" });
+
+    if (cart.paymentPaid) {
+      return res.status(400).json({
+        message: "Paid cart items cannot be removed",
+        error: "Payment completed",
+      });
+    }
 
     if (cart.status !== "ready") {
       return res.status(400).json({ message: "Only cart items with status 'ready' can be removed", error: "Invalid status" });
