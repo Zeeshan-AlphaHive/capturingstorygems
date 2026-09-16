@@ -8,6 +8,12 @@ const {
   extractTrimCode,
   getExpectedPageSizePoints,
 } = require("../../utils/luluPodConfig.js");
+const {
+  buildInteriorLayout,
+  verifyLayoutAgainstSpec,
+  PTS_PER_INCH: LAYOUT_PTS,
+} = require("../../utils/pdfLayout.js");
+const { embedInteriorFonts, embedCoverFonts } = require("../../utils/pdfFonts.js");
 const axios = require("axios");
 // fontkit is required by pdf-lib to embed TTF/OTF fonts
 let fontkit = null;
@@ -183,12 +189,18 @@ function drawCentered(page, text, font, fontSize, y, color) {
   return y - fontSize * 1.4;
 }
 
-/** Draw a page number centered at the bottom of a page. */
-function drawPageNumber(page, num, font) {
+/** Draw a page number centered in the bottom margin (9 pt per print spec). */
+function drawPageNumber(page, num, font, { bottomMargin = 0.725 * 72, size = 9 } = {}) {
   const text = String(num);
-  const size = 12; // match CSS: .page-number { font-size: 12px }
   const tw = font.widthOfTextAtSize(text, size);
-  page.drawText(text, { x: (page.getWidth() - tw) / 2, y: 30, size, font, color: rgb(0.4, 0.4, 0.4) });
+  const y = Math.max(14, bottomMargin * 0.42);
+  page.drawText(text, {
+    x: (page.getWidth() - tw) / 2,
+    y,
+    size,
+    font,
+    color: rgb(0.4, 0.4, 0.4),
+  });
 }
 
 /**
@@ -529,97 +541,71 @@ const generateBookPdf = async (req, res) => {
     // const CONTENT_H = PAGE_H - MARGIN * 2;
 
 
-    // ── Interior page constants (in PDF points, 72pt = 1in) ──
-    const PTS_PER_INCH = 72;
+    // ── Interior page constants (print specs via pdfLayout) ──
+    const PTS_PER_INCH = LAYOUT_PTS;
     let trimWidthIn = trimResolved.widthIn;
     let trimHeightIn = trimResolved.heightIn;
 
-    // =========================================================
-    // 🚀 LULU BLEED FIX
-    // =========================================================
-    // Full Color (FC) packages expect the PDF to include "Bleed" dimensions.
-    // Lulu requires adding 0.125" to the Top, Bottom, and Outside edges.
+    // Full Color (FC) packages expect bleed: +0.125" outside, +0.125" top & bottom.
     const needsBleed = podPackage.includes("FC");
-    // Width increases by 0.125". Height increases by 0.25" (top + bottom).
-    const finalWidthIn = needsBleed ? trimWidthIn + 0.125 : trimWidthIn;
-    const finalHeightIn = needsBleed ? trimHeightIn + 0.25 : trimHeightIn;
+    const layout = buildInteriorLayout({
+      widthIn: trimWidthIn,
+      heightIn: trimHeightIn,
+      needsBleed,
+      trimCode: trimResolved.trimCode,
+      label: trimResolved.label,
+    });
+    const layoutCheck = verifyLayoutAgainstSpec(layout);
+    console.log("PDF layout verification:", JSON.stringify(layoutCheck, null, 2));
+    if (!layoutCheck.ok) {
+      console.warn("PDF layout spec mismatches:", layoutCheck.issues);
+    }
 
-    const PAGE_W = finalWidthIn * PTS_PER_INCH;
-    const PAGE_H = finalHeightIn * PTS_PER_INCH;
-    console.log('Final PDF page size (points):', PAGE_W, 'x', PAGE_H);
+    const PAGE_W = layout.pageW;
+    const PAGE_H = layout.pageH;
+    const CONTENT_W = layout.contentW;
+    const CONTENT_H = layout.contentH;
+    const MARGIN_TOP = layout.top;
+    const MARGIN_BOTTOM = layout.bottom;
+    const getMargins = layout.getMargins;
+    console.log("Final PDF page size (points):", PAGE_W, "x", PAGE_H);
 
-    // We increase the margin slightly if bleed is added. 
-    // This ensures your text stays in the exact same physical spot on the printed page.
-    const baseMarginIn = 0.75;
-    const finalMarginIn = needsBleed ? baseMarginIn + 0.125 : baseMarginIn;
-    const MARGIN = finalMarginIn * PTS_PER_INCH;
-
-    const CONTENT_W = PAGE_W - MARGIN * 2;
-    const CONTENT_H = PAGE_H - MARGIN * 2;
-    // =========================================================
-    // Styles mapped from CSS snippet (pixels -> PDF points roughly 1:1)
-    const BODY_SIZE = 10; // .story-body { font-size: 14px }
-    const BODY_LEADING = Math.round(BODY_SIZE * 1.5);  // 1.5 line-height
-    const H1_SIZE = 32; // .title-page { font-size: 32px }
-    const H2_SIZE = 22; // h2 { font-size: 22px }
-    const TOC_TITLE_SIZE = 18; // .toc-title { font-size: 24px }
-    const TOC_ENTRY_SIZE = 12; // .toc-list { font-size: 14px }
+    // Typography (client print specs)
+    const BODY_SIZE = layout.type.bodySize; // 12 pt
+    const BODY_LEADING = layout.type.bodyLeading; // 15.75 pt
+    const H1_SIZE = 32; // book title page only
+    const H2_SIZE = layout.type.storyTitleSize; // 23 pt bold
+    const CAPTION_SIZE = layout.type.captionSize; // 9.25 pt italic
+    const PARA_SPACING = layout.type.paragraphSpacing; // 8 pt
+    const PAGE_NUM_SIZE = layout.type.pageNumberSize; // 9 pt
+    const TOC_TITLE_SIZE = 18;
+    const TOC_ENTRY_SIZE = 12;
     const SUBTITLE_SIZE = 12;
+    const FOOTER_SAFE = MARGIN_BOTTOM + 16; // keep body clear of page numbers
 
-    // Try to fetch font files (TTF/OTF preferred). Falls back to StandardFonts when unavailable.
-    const fetchFontBuffer = async (url) => {
-      if (!url || typeof url !== 'string') return null;
-      try {
-        const resp = await axios.get(url, { responseType: 'arraybuffer', timeout: 15000 });
-        return Buffer.from(resp.data);
-      } catch (e) {
-        console.warn('Failed to download font:', url, e?.message || e);
-        return null;
-      }
-    };
-
-    const [serifBuf, serifBoldBuf, sansBuf, sansBoldBuf] = await Promise.all([
-      fetchFontBuffer(process.env.SERIF_FONT_REGULAR_URL),
-      fetchFontBuffer(process.env.SERIF_FONT_BOLD_URL),
-      fetchFontBuffer(process.env.SANS_FONT_REGULAR_URL),
-      fetchFontBuffer(process.env.SANS_FONT_BOLD_URL),
-    ]);
+    const pageNumberOpts = { bottomMargin: MARGIN_BOTTOM, size: PAGE_NUM_SIZE };
+    const drawNum = (page, num, font) => drawPageNumber(page, num, font, pageNumberOpts);
 
     // ── Create the interior PDF document ──
     const interiorPdf = await PDFDocument.create();
-    // attempt to register fontkit before embedding custom font buffers
-    ensureFontkitRegistered(interiorPdf);
-    let serifFont;
-    let serifBold;
-    try {
-      serifFont = serifBuf ? await interiorPdf.embedFont(serifBuf, { features: { liga: false } }) : await interiorPdf.embedFont(StandardFonts.TimesRoman);
-    } catch (e) {
-      console.warn('Failed to embed serif regular font, falling back to StandardFonts.TimesRoman:', e?.message || e);
-      serifFont = await interiorPdf.embedFont(StandardFonts.TimesRoman);
-    }
-    try {
-      serifBold = serifBoldBuf ? await interiorPdf.embedFont(serifBoldBuf, { features: { liga: false } }) : await interiorPdf.embedFont(StandardFonts.TimesRomanBold);
-    } catch (e) {
-      console.warn('Failed to embed serif bold font, falling back to StandardFonts.TimesRomanBold:', e?.message || e);
-      serifBold = await interiorPdf.embedFont(StandardFonts.TimesRomanBold);
-    }
+    const { serifFont, serifBold, serifItalic } = await embedInteriorFonts(interiorPdf);
     const bodyColor = rgb(0.07, 0.07, 0.07);
     const grayColor = rgb(0.4, 0.4, 0.4);
 
-    // ── Helper: draw wrapped body text, adding pages as needed. Returns { pageNum, y } ──
+    // ── Helper: draw wrapped body text (left / ragged-right), adding pages as needed ──
     const drawBodyText = (rawText, startY, pageNum, existingPage) => {
       const lines = wrapText(rawText, serifFont, BODY_SIZE, CONTENT_W);
       let y = startY;
       let page = existingPage;
       for (const line of lines) {
-        if (y - BODY_LEADING < MARGIN + 20) {
-          // need a new page
-          drawPageNumber(page, pageNum, serifFont);
+        if (y - BODY_LEADING < FOOTER_SAFE) {
+          drawNum(page, pageNum, serifFont);
           pageNum++;
           page = interiorPdf.addPage([PAGE_W, PAGE_H]);
-          y = PAGE_H - MARGIN;
+          y = PAGE_H - MARGIN_TOP;
         }
-        page.drawText(line, { x: MARGIN, y, size: BODY_SIZE, font: serifFont, color: bodyColor });
+        const { left } = getMargins(pageNum);
+        page.drawText(line, { x: left, y, size: BODY_SIZE, font: serifFont, color: bodyColor });
         y -= BODY_LEADING;
       }
       return { page, y, pageNum };
@@ -646,7 +632,7 @@ const generateBookPdf = async (req, res) => {
     const totalTitleHeight = titleLines.length * lineHeight;
 
     // Try to draw image first (top of page). If present, place image near top and then draw title below it.
-    let currentY = PAGE_H - MARGIN; // starting y from top inside margin
+    let currentY = PAGE_H - MARGIN_TOP; // starting y from top inside margin
     const rawAuthor = reqAuthorName || book.authorName || "";
     if (reqCoverImage && typeof reqCoverImage === 'string' && reqCoverImage.trim().length > 0) {
       try {
@@ -694,7 +680,7 @@ const generateBookPdf = async (req, res) => {
     const afterTitleY = currentY - titleLines.length * lineHeight - 12;
     const authorText = rawAuthor && String(rawAuthor).trim() !== "" ? (String(rawAuthor).trim().toLowerCase().startsWith('by ') ? String(rawAuthor).trim() : `By ${String(rawAuthor).trim()}`) : "Generated by Capturing Story Gems";
     drawCentered(titlePage, authorText, serifFont, SUBTITLE_SIZE, afterTitleY - SUBTITLE_SIZE, grayColor);
-    drawPageNumber(titlePage, pageNum, serifFont);
+    drawNum(titlePage, pageNum, serifFont);
     pageNum++;
 
     // ── Pre-compute story chunks for TOC page numbers ──
@@ -714,7 +700,7 @@ const generateBookPdf = async (req, res) => {
     }
 
     // Estimate how many content lines fit on one page
-    const LINES_PER_PAGE = Math.floor((CONTENT_H - 30) / BODY_LEADING); // ~33
+    const LINES_PER_PAGE = Math.floor((CONTENT_H - 30) / BODY_LEADING);
     // First page of a story has title + optional image so fewer lines
     const FIRST_PAGE_HEADER = H2_SIZE * 1.6 + 8; // title space
     const FIRST_PAGE_LINES = Math.floor((CONTENT_H - FIRST_PAGE_HEADER - 30) / BODY_LEADING);
@@ -799,9 +785,10 @@ const generateBookPdf = async (req, res) => {
     // ── TOC PAGES ──
     for (let tp = 0; tp < tocPageCount; tp++) {
       const tocPage = interiorPdf.addPage([PAGE_W, PAGE_H]);
-      let ty = PAGE_H - MARGIN;
+      const { left: tocLeft } = getMargins(pageNum);
+      let ty = PAGE_H - MARGIN_TOP;
       // Title
-      tocPage.drawText("Table of Contents", { x: MARGIN, y: ty, size: TOC_TITLE_SIZE, font: serifBold, color: bodyColor });
+      tocPage.drawText("Table of Contents", { x: tocLeft, y: ty, size: TOC_TITLE_SIZE, font: serifBold, color: bodyColor });
       ty -= TOC_TITLE_SIZE * 2;
 
       const sliceStart = tp * TOC_LINES_PER_PAGE;
@@ -810,20 +797,21 @@ const generateBookPdf = async (req, res) => {
         const entry = tocData[i];
         const titleText = entry.title;
         const pageText = String(entry.startPage);
-        tocPage.drawText(titleText, { x: MARGIN, y: ty, size: TOC_ENTRY_SIZE, font: serifFont, color: bodyColor });
+        tocPage.drawText(titleText, { x: tocLeft, y: ty, size: TOC_ENTRY_SIZE, font: serifFont, color: bodyColor });
         const ptw = serifFont.widthOfTextAtSize(pageText, TOC_ENTRY_SIZE);
-        tocPage.drawText(pageText, { x: PAGE_W - MARGIN - ptw, y: ty, size: TOC_ENTRY_SIZE, font: serifFont, color: bodyColor });
+        const { right: tocRight } = getMargins(pageNum);
+        tocPage.drawText(pageText, { x: PAGE_W - tocRight - ptw, y: ty, size: TOC_ENTRY_SIZE, font: serifFont, color: bodyColor });
         // dotted leader
         const dotWidth = serifFont.widthOfTextAtSize(".", TOC_ENTRY_SIZE);
         const titleWidth = serifFont.widthOfTextAtSize(titleText, TOC_ENTRY_SIZE);
-        let dotX = MARGIN + titleWidth + 4;
-        while (dotX + dotWidth < PAGE_W - MARGIN - ptw - 4) {
+        let dotX = tocLeft + titleWidth + 4;
+        while (dotX + dotWidth < PAGE_W - tocRight - ptw - 4) {
           tocPage.drawText(".", { x: dotX, y: ty, size: TOC_ENTRY_SIZE, font: serifFont, color: grayColor });
           dotX += dotWidth + 2;
         }
         ty -= TOC_ENTRY_SIZE * 1.8;
       }
-      drawPageNumber(tocPage, pageNum, serifFont);
+      drawNum(tocPage, pageNum, serifFont);
       pageNum++;
     }
 
@@ -836,7 +824,7 @@ const generateBookPdf = async (req, res) => {
       const qrHeadingW = serifBold.widthOfTextAtSize(qrHeading, qrHeadingSize);
       qrPage.drawText(qrHeading, {
         x: (PAGE_W - qrHeadingW) / 2,
-        y: PAGE_H - MARGIN - qrHeadingSize,
+        y: PAGE_H - MARGIN_TOP - qrHeadingSize,
         size: qrHeadingSize,
         font: serifBold,
         color: bodyColor,
@@ -847,7 +835,7 @@ const generateBookPdf = async (req, res) => {
       const qrSubW = serifFont.widthOfTextAtSize(qrSubtitle, qrSubSize);
       qrPage.drawText(qrSubtitle, {
         x: (PAGE_W - qrSubW) / 2,
-        y: PAGE_H - MARGIN - qrHeadingSize - 28,
+        y: PAGE_H - MARGIN_TOP - qrHeadingSize - 28,
         size: qrSubSize,
         font: serifFont,
         color: grayColor,
@@ -858,35 +846,51 @@ const generateBookPdf = async (req, res) => {
       const qrY = (PAGE_H - qrDrawSize) / 2 - 10;
       qrPage.drawImage(qrImage, { x: qrX, y: qrY, width: qrDrawSize, height: qrDrawSize });
 
-      drawPageNumber(qrPage, pageNum, serifFont);
+      drawNum(qrPage, pageNum, serifFont);
       pageNum++;
     }
 
     // add an extra blank page after the TOC / QR (acts as a visual separator)
     const blankAfterToc = interiorPdf.addPage([PAGE_W, PAGE_H]);
     // (no content) just draw the page number
-    drawPageNumber(blankAfterToc, pageNum, serifFont);
+    drawNum(blankAfterToc, pageNum, serifFont);
     pageNum++;
 
     // ── STORY PAGES ──
     for (const sc of storyChunks) {
       const s = sc.story;
       let page = interiorPdf.addPage([PAGE_W, PAGE_H]);
-      let y = PAGE_H - MARGIN;
+      let margins = getMargins(pageNum);
+      let y = PAGE_H - MARGIN_TOP;
 
-      // Story title
+      // Story title (22–24 pt bold → 23 pt), left / ragged-right
       const titleLines = wrapText(s.story_title || "Untitled", serifBold, H2_SIZE, CONTENT_W);
       for (const tl of titleLines) {
-        page.drawText(tl, { x: MARGIN, y, size: H2_SIZE, font: serifBold, color: bodyColor });
-        y -= H2_SIZE * 1.4;
+        page.drawText(tl, { x: margins.left, y, size: H2_SIZE, font: serifBold, color: bodyColor });
+        y -= H2_SIZE * 1.35;
       }
-      y -= 6; // small gap after title
+
+      // Caption under title (genre), 9–9.5 pt italic
+      const captionText = s.genre ? String(s.genre).trim() : "";
+      if (captionText) {
+        y -= 4;
+        page.drawText(captionText, {
+          x: margins.left,
+          y,
+          size: CAPTION_SIZE,
+          font: serifItalic,
+          color: grayColor,
+        });
+        y -= CAPTION_SIZE + 6;
+      } else {
+        y -= 6;
+      }
 
       // Hero image handling with alignment (left, center, right)
       let imgData = null;
       let imgW = 0;
       let imgH = 0;
-      let imgX = MARGIN;
+      let imgX = margins.left;
       let imgY = 0;
       let imgBottomY = 0; // y position where image ends (for text wrapping)
       const alignment = s.heroImageAlignment || "center";
@@ -914,7 +918,7 @@ const generateBookPdf = async (req, res) => {
               if (imgH > maxImgH) {
                 imgH = maxImgH;
               }
-              imgX = MARGIN;
+              imgX = margins.left;
             } else {
               // Left or right: use ~40% width, preserve aspect ratio
               const maxImgW = CONTENT_W * 0.4;
@@ -924,9 +928,9 @@ const generateBookPdf = async (req, res) => {
               imgH = imgData.height * scale;
 
               if (alignment === "left") {
-                imgX = MARGIN;
+                imgX = margins.left;
               } else {
-                imgX = PAGE_W - MARGIN - imgW;
+                imgX = PAGE_W - margins.right - imgW;
               }
             }
 
@@ -942,15 +946,37 @@ const generateBookPdf = async (req, res) => {
 
       // Body text with wrapping around image for left/right alignment
       if (imgData && (alignment === "left" || alignment === "right")) {
-        // Text wraps beside the image until we pass the image bottom
         const textWidthBesideImg = CONTENT_W - imgW - IMG_TEXT_GAP;
-        const textXBesideImg = alignment === "left" ? (MARGIN + imgW + IMG_TEXT_GAP) : MARGIN;
-        const textXFull = MARGIN;
-
-        // Track the page where the image exists - only wrap text beside image on that page
+        const textXBesideImg =
+          alignment === "left" ? margins.left + imgW + IMG_TEXT_GAP : margins.left;
         const imagePageRef = page;
+        // Glyphs extend above the baseline — full-width text must start lower than imgBottomY
+        const fullWidthBelowY = imgBottomY - BODY_SIZE - 4;
 
-        // Process text word by word, switching width when we pass the image
+        const layoutForBaseline = (baselineY) => {
+          if (page !== imagePageRef) {
+            return { x: margins.left, width: CONTENT_W, beside: false };
+          }
+          if (baselineY > fullWidthBelowY) {
+            return { x: textXBesideImg, width: textWidthBesideImg, beside: true };
+          }
+          return { x: margins.left, width: CONTENT_W, beside: false };
+        };
+
+        const ensureBelowImage = () => {
+          if (page === imagePageRef && y > fullWidthBelowY) {
+            y = fullWidthBelowY;
+          }
+        };
+
+        const drawBodyLine = (line) => {
+          let { x, width, beside } = layoutForBaseline(y);
+          if (!beside) ensureBelowImage();
+          ({ x, width } = layoutForBaseline(y));
+          page.drawText(line, { x, y, size: BODY_SIZE, font: serifFont, color: bodyColor });
+          y -= BODY_LEADING;
+        };
+
         const storyText = String(s.enhanced_story || "").replace(/\r/g, "");
         const paragraphs = storyText.split(/\n{2,}/);
 
@@ -960,64 +986,41 @@ const generateBookPdf = async (req, res) => {
 
           const words = trimmed.split(/\s+/);
           let currentLine = "";
-          // Only wrap beside image if we're still on the image page AND above the image bottom
-          let isBesideImage = (page === imagePageRef) && (y > imgBottomY);
-          let currentWidth = isBesideImage ? textWidthBesideImg : CONTENT_W;
-          let currentX = isBesideImage ? textXBesideImg : textXFull;
+          let { width: currentWidth } = layoutForBaseline(y);
 
           for (const word of words) {
             const testLine = currentLine.length === 0 ? word : currentLine + " " + word;
             const testWidth = serifFont.widthOfTextAtSize(testLine, BODY_SIZE);
+            ({ width: currentWidth } = layoutForBaseline(y));
 
             if (testWidth > currentWidth && currentLine.length > 0) {
-              // Output current line
-              if (y - BODY_LEADING < MARGIN + 20) {
-                drawPageNumber(page, pageNum, serifFont);
+              if (y - BODY_LEADING < FOOTER_SAFE) {
+                drawNum(page, pageNum, serifFont);
                 pageNum++;
                 page = interiorPdf.addPage([PAGE_W, PAGE_H]);
-                y = PAGE_H - MARGIN;
-                // New page has no image - always use full width
-                isBesideImage = false;
-                currentWidth = CONTENT_W;
-                currentX = textXFull;
+                margins = getMargins(pageNum);
+                y = PAGE_H - MARGIN_TOP;
               }
-              page.drawText(currentLine, { x: currentX, y, size: BODY_SIZE, font: serifFont, color: bodyColor });
-              y -= BODY_LEADING;
-
-              // Check if we've passed the image after this line (only matters on image page)
-              isBesideImage = (page === imagePageRef) && (y > imgBottomY);
-              currentWidth = isBesideImage ? textWidthBesideImg : CONTENT_W;
-              currentX = isBesideImage ? textXBesideImg : textXFull;
-
+              drawBodyLine(currentLine);
+              ({ width: currentWidth } = layoutForBaseline(y));
               currentLine = word;
             } else {
               currentLine = testLine;
             }
           }
 
-          // Output remaining text in paragraph
           if (currentLine.length > 0) {
-            if (y - BODY_LEADING < MARGIN + 20) {
-              drawPageNumber(page, pageNum, serifFont);
+            if (y - BODY_LEADING < FOOTER_SAFE) {
+              drawNum(page, pageNum, serifFont);
               pageNum++;
               page = interiorPdf.addPage([PAGE_W, PAGE_H]);
-              y = PAGE_H - MARGIN;
-              // New page has no image - always use full width
-              isBesideImage = false;
-              currentWidth = CONTENT_W;
-              currentX = textXFull;
+              margins = getMargins(pageNum);
+              y = PAGE_H - MARGIN_TOP;
             }
-            page.drawText(currentLine, { x: currentX, y, size: BODY_SIZE, font: serifFont, color: bodyColor });
-            y -= BODY_LEADING;
-
-            // Update position tracking after paragraph (only matters on image page)
-            isBesideImage = (page === imagePageRef) && (y > imgBottomY);
-            currentWidth = isBesideImage ? textWidthBesideImg : CONTENT_W;
-            currentX = isBesideImage ? textXBesideImg : textXFull;
+            drawBodyLine(currentLine);
           }
 
-          // Paragraph break
-          y -= BODY_LEADING * 0.6;
+          y -= PARA_SPACING;
         }
       } else {
         // Center alignment or no image - text flows below image
@@ -1025,24 +1028,25 @@ const generateBookPdf = async (req, res) => {
           y = imgBottomY - BODY_LEADING; // Start text below the centered image
         }
 
-        // Body text (line by line, adding pages as needed)
+        // Body text (line by line, left / ragged-right, adding pages as needed)
         for (const line of sc.lines) {
           if (line === "") {
             // paragraph break
-            y -= BODY_LEADING * 0.6;
+            y -= PARA_SPACING;
             continue;
           }
-          if (y - BODY_LEADING < MARGIN + 20) {
-            drawPageNumber(page, pageNum, serifFont);
+          if (y - BODY_LEADING < FOOTER_SAFE) {
+            drawNum(page, pageNum, serifFont);
             pageNum++;
             page = interiorPdf.addPage([PAGE_W, PAGE_H]);
-            y = PAGE_H - MARGIN;
+            margins = getMargins(pageNum);
+            y = PAGE_H - MARGIN_TOP;
           }
-          page.drawText(line, { x: MARGIN, y, size: BODY_SIZE, font: serifFont, color: bodyColor });
+          page.drawText(line, { x: margins.left, y, size: BODY_SIZE, font: serifFont, color: bodyColor });
           y -= BODY_LEADING;
         }
       }
-      drawPageNumber(page, pageNum, serifFont);
+      drawNum(page, pageNum, serifFont);
       pageNum++;
     }
 
@@ -1053,7 +1057,7 @@ const generateBookPdf = async (req, res) => {
       if (currentPageCount % 2 === 1) {
         const blankPage = interiorPdf.addPage([PAGE_W, PAGE_H]);
         // draw page number on the blank page to keep numbering consistent
-        drawPageNumber(blankPage, pageNum, serifFont);
+        drawNum(blankPage, pageNum, serifFont);
         pageNum++;
       }
     } catch (e) {
@@ -1122,22 +1126,7 @@ const generateBookPdf = async (req, res) => {
     }
 
     const coverPdf = await PDFDocument.create();
-    // attempt to register fontkit before embedding custom font buffers
-    ensureFontkitRegistered(coverPdf);
-    let sansFont;
-    let sansBold;
-    try {
-      sansFont = sansBuf ? await coverPdf.embedFont(sansBuf, { features: { liga: false } }) : await embedFontFromUrl(coverPdf, process.env.SANS_FONT_REGULAR_URL, StandardFonts.Helvetica);
-    } catch (e) {
-      console.warn('Failed to embed sans regular font, falling back to StandardFonts.Helvetica:', e?.message || e);
-      sansFont = await coverPdf.embedFont(StandardFonts.Helvetica);
-    }
-    try {
-      sansBold = sansBoldBuf ? await coverPdf.embedFont(sansBoldBuf, { features: { liga: false } }) : await embedFontFromUrl(coverPdf, process.env.SANS_FONT_BOLD_URL, StandardFonts.HelveticaBold);
-    } catch (e) {
-      console.warn('Failed to embed sans bold font, falling back to StandardFonts.HelveticaBold:', e?.message || e);
-      sansBold = await coverPdf.embedFont(StandardFonts.HelveticaBold);
-    }
+    const { sansFont, sansBold } = await embedCoverFonts(coverPdf);
     const cwPt = coverWidthIn * PTS_PER_INCH;
     const chPt = coverHeightIn * PTS_PER_INCH;
     const spineW = 0.5 * PTS_PER_INCH; // 36pt
@@ -1313,6 +1302,8 @@ const generateBookPdf = async (req, res) => {
           page_size_inches: pageSize
             ? { width: pageSize.widthIn, height: pageSize.heightIn }
             : undefined,
+          layout_spec: layoutCheck.report,
+          layout_verified: layoutCheck.ok,
         }
       }
     });
