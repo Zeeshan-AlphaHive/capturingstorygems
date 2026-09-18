@@ -1068,8 +1068,12 @@ const generateBookPdf = async (req, res) => {
     const interiorBytes = await interiorPdf.save();
     const interiorPath = path.join(booksDir, `interior-${book._id}.pdf`);
     fs.writeFileSync(interiorPath, interiorBytes);
+    // Actual page count after all pages (stories, TOC, QR, even-page pad) — NOT the estimate.
+    // Case Wrap spine width jumps at page-count boundaries (e.g. 84 vs 88 → 0.25" vs 0.5").
+    const actualInteriorPageCount = interiorPdf.getPageCount();
     console.log(
-      `Interior PDF size: ${(interiorBytes.length / 1024 / 1024).toFixed(2)}MB`
+      `Interior PDF size: ${(interiorBytes.length / 1024 / 1024).toFixed(2)}MB, ` +
+        `pages: ${actualInteriorPageCount} (estimate was ${totalPagesWithoutBlanks})`
     );
 
     // =================================================
@@ -1077,9 +1081,11 @@ const generateBookPdf = async (req, res) => {
     // =================================================
     let coverWidthIn = 12.325;
     let coverHeightIn = 9.25;
+    let coverWidthPt = null;
+    let coverHeightPt = null;
     const reqCoverWidth = (req.body && req.body.cover_width) || undefined;
     const reqCoverHeight = (req.body && req.body.cover_height) || undefined;
-    const interiorPageCount = totalPagesWithoutBlanks;
+    const interiorPageCount = actualInteriorPageCount;
 
     if (reqCoverWidth && reqCoverHeight) {
       coverWidthIn = parseFloat(reqCoverWidth) || coverWidthIn;
@@ -1091,19 +1097,36 @@ const generateBookPdf = async (req, res) => {
         const dims = await luluClient.getCoverDimensions({
           pod_package_id: podPackage,
           interior_page_count: interiorPageCount,
-          unit: "inch",
+          unit: "pt",
         });
-        if (dims && dims.width && dims.height) {
-          const rw = parseFloat(dims.width); const rh = parseFloat(dims.height);
-          if (rw > 0) coverWidthIn = rw;
-          if (rh > 0) coverHeightIn = rh;
+        console.log("Cover dimensions (from Lulu):", dims);
+        // Prefer points from Lulu to avoid inch→pt rounding (e.g. 17.130" → 17.125").
+        const unit = String(dims?.unit || "pt").toLowerCase();
+        const rw = parseFloat(dims?.width);
+        const rh = parseFloat(dims?.height);
+        if (rw > 0 && rh > 0) {
+          if (unit === "pt" || unit === "point" || unit === "points") {
+            coverWidthPt = rw;
+            coverHeightPt = rh;
+            coverWidthIn = rw / PTS_PER_INCH;
+            coverHeightIn = rh / PTS_PER_INCH;
+          } else if (unit === "mm") {
+            coverWidthIn = rw / 25.4;
+            coverHeightIn = rh / 25.4;
+          } else {
+            coverWidthIn = rw;
+            coverHeightIn = rh;
+          }
         }
       } catch (e) {
         console.warn('Failed to fetch cover dimensions, using defaults', e.message);
       }
     }
 
-    console.log(`Cover dimensions: ${coverWidthIn}in x ${coverHeightIn}in`);
+    console.log(
+      `Cover dimensions for ${interiorPageCount} pages: ${coverWidthIn.toFixed(4)}in x ${coverHeightIn.toFixed(4)}in ` +
+        `(${((coverWidthPt ?? coverWidthIn * PTS_PER_INCH)).toFixed(2)}pt x ${((coverHeightPt ?? coverHeightIn * PTS_PER_INCH)).toFixed(2)}pt)`
+    );
 
     // Resolve cover image: new upload, reuse saved URL, or clear
     let coverImageUrl = book.coverImageUrl || undefined;
@@ -1127,8 +1150,8 @@ const generateBookPdf = async (req, res) => {
 
     const coverPdf = await PDFDocument.create();
     const { sansFont, sansBold } = await embedCoverFonts(coverPdf);
-    const cwPt = coverWidthIn * PTS_PER_INCH;
-    const chPt = coverHeightIn * PTS_PER_INCH;
+    const cwPt = coverWidthPt != null ? coverWidthPt : coverWidthIn * PTS_PER_INCH;
+    const chPt = coverHeightPt != null ? coverHeightPt : coverHeightIn * PTS_PER_INCH;
     const spineW = 0.5 * PTS_PER_INCH; // 36pt
     const panelW = (cwPt - spineW) / 2;
     const coverPage = coverPdf.addPage([cwPt, chPt]);
