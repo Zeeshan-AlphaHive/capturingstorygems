@@ -363,7 +363,7 @@ export default function BookBuilderPage() {
   const [validationResult, setValidationResult] = useState<any>(null);
   const [validationId, setValidationId] = useState<string | null>(null);
   // Lulu payload inputs
-  const [contactEmail, setContactEmail] = useState("zeeshan@example.com");
+  const [contactEmail, setContactEmail] = useState("johndoe@example.com");
   const [quantity, setQuantity] = useState<number>(1);
   const [shippingLevel, setShippingLevel] = useState("MAIL");
   const [shippingOption, setShippingOption] = useState("MAIL");
@@ -528,7 +528,7 @@ export default function BookBuilderPage() {
   const [shippingAddress, setShippingAddress] = useState({
     city: "Washington",
     country_code: "US",
-    name: "Zeeshan",
+    name: "John Doe",
     phone_number: "+1 453454",
     postcode: "20450",
     state_code: "DC",

@@ -326,7 +326,7 @@ const checkoutComplete = async (req, res) => {
       }
 
       const session = await stripe.checkout.sessions.retrieve(transactionId, {
-        expand: ["line_items"],
+        expand: ["line_items", "payment_intent"],
       });
       const metadata = session.metadata || {};
       const { userId, planId, startDate, expiryDate, kind, cartId } = metadata;
@@ -343,20 +343,38 @@ const checkoutComplete = async (req, res) => {
           const PrintingPayment = require("../../models/printingPayment.js");
           const Cart = require("../../models/cart.js");
           console.log("Recording printing payment for cart checkout", { transactionId, cartId, userId, amount, status });
-          // create a printing payment record
+
+          const paymentIntentId =
+            typeof session.payment_intent === "string"
+              ? session.payment_intent
+              : session.payment_intent?.id || null;
+
           await PrintingPayment.create({
             transactionId,
+            checkoutSessionId: transactionId,
+            paymentIntentId,
             cartId,
             userId,
             amount,
+            amountCents: session.amount_total || Math.round(amount * 100),
             currency: session.currency || undefined,
             status,
             metadata: session.metadata || {},
             raw: session,
+            refundStatus: "none",
           });
           console.log("Printing payment recorded successfully for cart checkout", { transactionId, cartId });
-          // mark cart as paid so frontend can show Send-to-Print button
-          await cart.updateOne({ _id: cartId }, { $set: { paymentPaid: true, paymentTransactionId: transactionId } });
+          await cart.updateOne(
+            { _id: cartId },
+            {
+              $set: {
+                paymentPaid: true,
+                paymentTransactionId: transactionId,
+                paymentIntentId: paymentIntentId || undefined,
+                refundStatus: "none",
+              },
+            }
+          );
 
           const paidCart = await Cart.findById(cartId).lean();
           notifyBookPaymentSuccess(paidCart || { userId, email: session.customer_email }, {

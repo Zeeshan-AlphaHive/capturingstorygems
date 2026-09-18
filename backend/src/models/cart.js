@@ -25,6 +25,7 @@ const cartSchema = new Schema(
     paymentPaid: { type: Boolean, default: false },
     // optional stripe transaction/session id for reference
     paymentTransactionId: { type: String },
+    paymentIntentId: { type: String },
     shipping_address: { type: shippingSchema, required: true },
     shipping_option: { type: String },
     pod_package_id: { type: String },
@@ -35,6 +36,16 @@ const cartSchema = new Schema(
     total_price: { type: Number, default: 0 },
     currency: { type: String, default: "" },
     status: { type: String },
+    luluPrintJobId: { type: String },
+    refundStatus: {
+      type: String,
+      enum: ["none", "pending", "succeeded", "failed", "skipped"],
+      default: "none",
+    },
+    refundId: { type: String },
+    refundAmount: { type: Number },
+    refundedAt: { type: Date },
+    refundEmailSentAt: { type: Date },
   },
   { timestamps: true }
 );

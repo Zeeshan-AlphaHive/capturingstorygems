@@ -1485,6 +1485,77 @@ const bookPrintStatusEmail = async ({ bookTitle, status, printJobId }) => {
   `;
 };
 
+const bookPrintCanceledRefundEmail = async ({
+  bookTitle,
+  luluStatus,
+  refundAmount,
+  originalAmount,
+  stripeFee,
+  currency,
+  refundId,
+  printJobId,
+}) => {
+  const cur = (currency || "usd").toUpperCase();
+  const fmt = (n) =>
+    n != null && Number.isFinite(Number(n)) ? `${cur} ${Number(n).toFixed(2)}` : "—";
+  const statusLabel = String(luluStatus || "canceled").replace(/_/g, " ").toUpperCase();
+  const isRejected = String(luluStatus || "").toUpperCase() === "REJECTED";
+  const headline = isRejected ? "Print Order Rejected" : "Print Order Canceled";
+  const reasonText = isRejected
+    ? "Unfortunately, our print partner could not accept this order (often due to file or production requirements)."
+    : "Your print order was canceled before it could be completed.";
+
+  return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <title>${headline}</title>
+    </head>
+    <body style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f4f4f7; margin: 0; padding: 0;">
+      <div style="max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,0.05);">
+        <div style="background-color: #b45309; color: white; padding: 24px; text-align: center;">
+          <h1 style="margin: 0; font-size: 22px;">${headline}</h1>
+        </div>
+        <div style="padding: 32px; color: #333333;">
+          <p>Hi there,</p>
+          <p>${reasonText}</p>
+          <div style="background-color: #fff7ed; padding: 12px 16px; border-radius: 8px; margin: 16px 0; color: #9a3412;">
+            <strong>Book:</strong> ${bookTitle || "My Keepsake Book"}<br />
+            <strong>Print status:</strong> ${statusLabel}<br />
+            ${printJobId ? `<strong>Print job ID:</strong> ${printJobId}<br />` : ""}
+          </div>
+          <p><strong>Refund details</strong></p>
+          <div style="background-color: #ecfdf5; padding: 12px 16px; border-radius: 8px; margin: 16px 0; color: #065f46;">
+            <strong>Original payment:</strong> ${fmt(originalAmount)}<br />
+            ${
+              refundAmount != null && Number.isFinite(Number(refundAmount)) && Number(refundAmount) > 0
+                ? `<strong>Refund amount:</strong> ${fmt(refundAmount)}<br />`
+                : `<strong>Refund:</strong> Being processed by our team<br />`
+            }
+            ${
+              stripeFee != null && Number(stripeFee) > 0
+                ? `<strong>Payment processing fee retained:</strong> ${fmt(stripeFee)}<br />
+            <span style="font-size: 13px;">(Stripe card processing fee cannot be returned.)</span><br />`
+                : ""
+            }
+            ${refundId ? `<strong>Refund reference:</strong> ${refundId}<br />` : ""}
+          </div>
+          <p>${
+            refundAmount != null && Number(refundAmount) > 0
+              ? "Your print price and any markup included in your payment are included in the refund. Refunds usually appear on your original payment method within <strong>5–10 business days</strong>, depending on your bank."
+              : "If a payment was taken for this print order, we will refund it shortly and send another confirmation."
+          }</p>
+          <p>If you have questions, reply to this email or contact our support team.</p>
+          <p style="margin-top: 32px;">— Capturing Story Gems</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+};
+
 const supportRequestEmail = async (name, email, message) => {
   return `
     <!DOCTYPE html>
@@ -1650,5 +1721,6 @@ module.exports = {
   bookPaymentSuccessEmail,
   bookSentToLuluEmail,
   bookPrintStatusEmail,
+  bookPrintCanceledRefundEmail,
   supportRequestEmail,
 };
